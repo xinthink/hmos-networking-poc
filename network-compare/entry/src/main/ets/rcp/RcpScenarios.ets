@@ -337,8 +337,72 @@ export class RcpScenarios {
     return rcp.createSession({ requestConfiguration: config });
   }
 
+  /**
+   * Plain session WITHOUT any code-level CA trust: relies purely on the
+   * system network security configuration (network_config.json trust-anchors).
+   * Used to verify that system-level trust-anchors apply to RCP too.
+   */
+  private static newSystemTrustSession(): rcp.Session {
+    return rcp.createSession();
+  }
+
   private static async fetchMethod(session: rcp.Session, method: string): Promise<rcp.Response> {
     const req = new rcp.Request(`${AppConfig.http1Base()}/api/methods`, method);
     return session.fetch(req);
+  }
+
+  /**
+   * Network Security Configuration (network_config.json) — trust-anchors.
+   * The app embeds the mock CA under resfile/mock-ca and references it via
+   * base-config.trust-anchors in network_config.json. This scenario uses NO
+   * code-level CA (no remoteValidation), so success proves the system-level
+   * trust-anchors are honored by RCP.
+   */
+  static async nscTrustAnchors(): Promise<ScenarioResult> {
+    const session = RcpScenarios.newSystemTrustSession();
+    try {
+      const resp = await session.get(`${AppConfig.httpsBase()}/api/protocol`);
+      const body = JSON.parse(resp.toString() ?? '{}') as Record<string, string>;
+      const detail =
+        `HTTP status : ${resp.statusCode}\n` +
+        `client HTTP : ${resp.httpVersion}\n` +
+        `server saw  : ${body['protocol']}\n` +
+        `note        : no code-level remoteValidation; trust comes from network_config.json base-config.trust-anchors`;
+      return new ScenarioResult(resp.statusCode === 200,
+        resp.statusCode === 200 ? 'system trust-anchors honored (HTTPS OK)' : 'system trust-anchors NOT honored', detail,
+        resp.statusCode);
+    } catch (e) {
+      const err = e as BusinessError;
+      return ScenarioResult.error('RCP nsc-trust-anchors', err as Error);
+    } finally {
+      session.close();
+    }
+  }
+
+  /**
+   * Network Security Configuration — component-config cleartext control.
+   * network_config.json sets component-config."Remote Communication Kit" to
+   * true (cleartext allowed). If set to false, system blocks RCP plaintext
+   * requests. This probes the current effective permission.
+   */
+  static async nscCleartext(): Promise<ScenarioResult> {
+    const session = rcp.createSession();
+    try {
+      const resp = await session.get(`${AppConfig.http1Base()}/api/protocol`);
+      const body = JSON.parse(resp.toString() ?? '{}') as Record<string, string>;
+      const detail =
+        `HTTP status : ${resp.statusCode}\n` +
+        `server saw  : ${body['protocol']}\n` +
+        `note        : cleartextTrafficPermitted=true in network_config.json base-config;\n` +
+        `              component-config.'Remote Communication Kit'=true allows plaintext for RCP.`;
+      return new ScenarioResult(resp.statusCode === 200,
+        resp.statusCode === 200 ? 'plaintext allowed (component-config true)' : 'plaintext blocked by system', detail,
+        resp.statusCode);
+    } catch (e) {
+      const err = e as BusinessError;
+      return ScenarioResult.error('RCP nsc-cleartext', err as Error);
+    } finally {
+      session.close();
+    }
   }
 }

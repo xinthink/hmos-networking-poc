@@ -77,8 +77,11 @@ devecocli emulator list / start "Pura 90"
 
 1. **端口固定**：8080（h1 明文）/ 8443（h2 TLS）。改端口须同步
    `mock-server/server.mjs` 与 `network-compare/.../common/AppConfig.ets`。
-2. **证书同步**：`npm run certs` 重新生成 `mock-server/certs/cert.pem` 后，**必须**把
-   PEM 内容同步到 `network-compare/.../common/AppConfig.ets` 的 `MOCK_CA_PEM`。
+2. **证书同步（两处）**：`npm run certs` 重新生成 `mock-server/certs/cert.pem` 后，
+   **必须**同步两处：
+   - `network-compare/.../common/AppConfig.ets` 的 `MOCK_CA_PEM`（代码级信任）；
+   - `network-compare/entry/src/main/resources/resfile/mock-ca/` 下的 `cert.pem` 与
+     `openssl x509 -hash` 命名的 `<hash>.0` 副本（network_config.json 系统级信任锚点）。
 3. **场景镜像**：每个对比场景在 App 两侧 runner 中同名成对实现（
    `NetKitScenarios.xxx` ↔ `RcpScenarios.xxx`），并对应 mock server 的一个或多个端点。
    新增场景的完整步骤见各子项目 AGENTS.md。
@@ -97,6 +100,8 @@ devecocli emulator list / start "Pura 90"
 | Cache (max-age) | ❌ 默认 `usingCache: true` 实测未命中 | ✅ `ResponseCache` 命中 |
 | Cache + ETag (304) | ❌ 未发送 If-None-Match | ✅ If-None-Match → 304 → 复用缓存 |
 | Multipart / 二进制上传 | ✅ | ✅ |
+| 网络安全配置: trust-anchors | ✅ 遵循 network_config.json 应用级信任锚点（base+domain 都需配置） | ❌ 不遵循；须代码级 `remoteValidation` |
+| 网络安全配置: 明文控制 | ✅ 受 component-config 约束（默认 true=受控） | ✅ 同样受约束，但 `"Remote Communication Kit"` 默认 **false=不受控**（API 23 起可置 true） |
 
 > ⚠️ 不要因为"看起来奇怪"就擅自"修复"上述差异 —— 它们是本工程要记录和对比的
 > **实测事实**（详见 `COMPARISON.md`）。若要改变实验条件（如给 Network Kit 配置

@@ -72,6 +72,18 @@ UI 上一张卡片并排展示两者结果。
   （`RcpScenarios.newSession()` 已封装）。
 - ⚠️ **若 mock server 重新生成证书，必须同步更新 `MOCK_CA_PEM`**，否则 HTTPS 失败。
 
+### 网络安全配置（network_config.json）
+- 配置文件：`entry/src/main/resources/base/profile/network_config.json`；证书目录：
+  `entry/src/main/resources/resfile/mock-ca/`（含 `cert.pem` 与 `openssl x509 -hash`
+  命名的 `<hash>.0` 副本）。
+- 实测结论（详见 `../COMPARISON.md`）：
+  - **trust-anchors**：Network Kit 遵循（须 base-config **与** domain-config 都配置，
+    否则被 domain 覆盖）；**RCP 不遵循**应用级 trust-anchors，必须用代码级
+    `remoteValidation`。
+  - **component-config 明文控制**：两框架都受控；`"Network Kit"` 默认 true，
+    `"Remote Communication Kit"` 默认 **false**（API 23 起支持，置 true 后同 Network Kit）。
+  - 若改动本配置做对比实验，改完必须重新构建部署（配置随 HAP 打包）。
+
 ### 服务器可达性
 - 模拟器访问宿主机：`10.0.2.2`（`AppConfig.host` 默认值，UI 顶部可改）。
 - 真机：改为开发机局域网 IP。

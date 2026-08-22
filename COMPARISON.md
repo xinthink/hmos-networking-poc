@@ -59,6 +59,8 @@
 | Cache + ETag | ❌ **未发送 If-None-Match**（`ifNoneMatchSeen=0`），两次均 200 走网络 | ✅ **If-None-Match → 304 → 复用缓存**（`ifNoneMatchSeen=1, notModified304=1`，`servedFromCache=true`） |
 | Multipart 上传 | ✅ 2 parts（文本 + 二进制文件） | ✅ 2 parts |
 | 二进制上传 | ✅ 4096 bytes, sha256 一致 | ✅ 4096 bytes, sha256 一致 |
+| 网络安全配置: trust-anchors | ✅ **系统级信任锚点生效**：无代码级 `caData` 时 HTTPS 成功（需同时在 base-config 与 domain-config 配置） | ❌ **不遵循应用级 trust-anchors**：network_config.json 配置后仍报 SSL 证书错误，必须用代码级 `remoteValidation` |
+| 网络安全配置: 明文控制 | ✅ **受系统明文禁令约束**（`component-config."Network Kit"` 默认 true=受控）：全局禁明文时请求报 `Cleartext traffic not permitted` | ✅ **同样受约束**（`component-config."Remote Communication Kit"` 默认 **false=不受控**，设为 true 后生效）：报 `Plaintext transmission is forbidden` |
 
 ### 实测发现的三个关键差异
 
@@ -86,6 +88,43 @@
    不是 `name=value; name=value`，开发者自行解析时需按 tab 分隔处理（本工程
    `NetKitScenarios.extractCookieHeader()` 演示了两种格式的兼容解析）。
 
+### 网络安全配置（network_config.json）实测详析
+
+工程已接入系统网络安全配置：`entry/src/main/resources/base/profile/network_config.json`
+（证书预置于 `entry/src/main/resources/resfile/mock-ca/`）。实测两种能力：
+
+**① trust-anchors（应用级信任 CA）**
+
+| 配置 | Network Kit | RCP |
+|------|-------------|-----|
+| 仅 base-config 配 trust-anchors | ❌ SSL 错误（被 domain-config 覆盖） | ❌ SSL 错误 |
+| base-config + domain-config 都配 | ✅ HTTPS 成功（无代码级 caData） | ❌ 仍报 SSL 错误 |
+
+- **Network Kit 遵循 network_config.json 的应用级信任锚点**：base-config 与
+  domain-config（`10.0.2.2`）都配置 `trust-anchors` 后，不带 `caData` 的 HTTPS 请求
+  成功（连接信息显示 HTTP/2）。
+- **RCP 不遵循应用级 trust-anchors**：同样的 network_config.json 下仍报
+  `SSL peer certificate ... was not OK`。RCP 的 `remoteValidation: 'system'` 只信任
+  系统/用户 CA，应用级 trust-anchors 必须通过代码级
+  `remoteValidation: { content / folderPath }` 指定（即 `RcpScenarios.newSession()`）。
+- 注意点：trust-anchors 的证书目录同时放 `cert.pem` 与 `openssl x509 -hash` 命名的
+  副本（`<hash>.0`），以兼容不同加载实现。
+
+**② cleartextTrafficPermitted / component-config（明文 HTTP 控制）**
+
+| 配置 | Network Kit | RCP |
+|------|-------------|-----|
+| 全局禁明文 + 组件受控 | ✅ 拦截：`Cleartext traffic not permitted` | ✅ 拦截：`Plaintext transmission is forbidden` |
+| 全局禁明文 + 组件不受控 | — | ✅ 明文仍可用（HTTP 200） |
+
+- 两框架**都受** `component-config` 明文控制，语义为"该组件是否受系统明文禁令约束"：
+  - `component-config."Network Kit"` 默认 **true**（受控）。
+  - `component-config."Remote Communication Kit"` 默认 **false**（不受控，API 23 起
+    支持配置）；设为 true 后与 Network Kit 行为一致。
+- 即：默认配置下全局禁明文时，Network Kit 会被拦截而 RCP 不受影响；这是迁移到 RCP
+  时**需要显式配置** `component-config."Remote Communication Kit": true` 才能获得同等
+  明文管控的关键差异。
+
 ## 可行性结论（模拟器实测后更新）
 
 - **可平滑替换**：REST 方法、HTTP/1.1/2 协议、Multipart、二进制上传等核心 HTTP
@@ -93,6 +132,12 @@
 - **需注意**：若现有代码依赖 Network Kit 的"零配置缓存"（`usingCache: true`），
   实测在默认配置下并未命中缓存，RCP 反而需要显式配置 `ResponseCache` 才能生效——
   迁移时两者都要重新审视缓存配置。
+- **网络安全配置（迁移重点）**：
+  - 应用级 CA 信任（trust-anchors）：Network Kit 读 network_config.json，RCP **不读**，
+    迁移后需改用代码级 `remoteValidation` 指定 CA（本工程已封装于
+    `RcpScenarios.newSession()`）。
+  - 明文管控：RCP 的 `component-config."Remote Communication Kit"` 默认不受控，需要
+    明文禁令时须显式置 true，否则全局禁明文只对 Network Kit 生效。
 - **Header 大小写**：若业务或服务端对 header 名大小写敏感（如某些网关做签名校验），
   从 Network Kit 迁到 RCP 后 HTTP/1.1 上的 header 名会从"全小写"变成"保留原大小写"，
   需确认服务端兼容。

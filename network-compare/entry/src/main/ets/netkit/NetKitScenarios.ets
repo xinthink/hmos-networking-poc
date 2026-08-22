@@ -476,4 +476,77 @@ export class NetKitScenarios {
     }
     return pairs.join('; ');
   }
+
+  /**
+   * Network Security Configuration (network_config.json) — trust-anchors.
+   * The app embeds the mock CA under resfile/mock-ca and references it via
+   * base-config.trust-anchors in network_config.json. This scenario sends NO
+   * code-level CA (no caData), so success proves the system-level trust-anchors
+   * are honored by Network Kit.
+   */
+  static async nscTrustAnchors(): Promise<ScenarioResult> {
+    const req = http.createHttp();
+    try {
+      const options: http.HttpRequestOptions = {
+        method: http.RequestMethod.GET,
+        expectDataType: http.HttpDataType.STRING,
+        usingProtocol: http.HttpProtocol.HTTP2,
+        readTimeout: 15000,
+        connectTimeout: 15000,
+        header: { 'Accept': 'application/json' },
+        // NOTE: no caData / caPath — trust comes from network_config.json
+      };
+      const resp = await req.request(`${AppConfig.httpsBase()}/api/protocol`, options);
+      const body = JSON.parse(String(resp.result)) as Record<string, string>;
+      const conn = resp.connectionExtraInfo;
+      const detail =
+        `HTTP status : ${resp.responseCode}\n` +
+        `client saw  : ${conn?.networkProtocolName ?? '(n/a)'}\n` +
+        `server saw  : ${body['protocol']}\n` +
+        `note        : no code-level caData; trust comes from network_config.json base-config.trust-anchors`;
+      return new ScenarioResult(resp.responseCode === 200,
+        resp.responseCode === 200 ? 'system trust-anchors honored (HTTPS OK)' : 'system trust-anchors NOT honored',
+        detail, resp.responseCode);
+    } catch (e) {
+      const err = e as BusinessError;
+      return ScenarioResult.error('NetworkKit nsc-trust-anchors', err as Error);
+    } finally {
+      req.destroy();
+    }
+  }
+
+  /**
+   * Network Security Configuration — component-config cleartext control.
+   * network_config.json sets component-config."Network Kit" to true (cleartext
+   * allowed). If set to false, system blocks Network Kit plaintext requests.
+   * This probes the current effective permission.
+   */
+  static async nscCleartext(): Promise<ScenarioResult> {
+    const req = http.createHttp();
+    try {
+      const options: http.HttpRequestOptions = {
+        method: http.RequestMethod.GET,
+        expectDataType: http.HttpDataType.STRING,
+        readTimeout: 15000,
+        connectTimeout: 15000,
+        header: { 'Accept': 'application/json' },
+        caData: AppConfig.MOCK_CA_PEM,
+      };
+      const resp = await req.request(`${AppConfig.http1Base()}/api/protocol`, options);
+      const body = JSON.parse(String(resp.result)) as Record<string, string>;
+      const detail =
+        `HTTP status : ${resp.responseCode}\n` +
+        `server saw  : ${body['protocol']}\n` +
+        `note        : cleartextTrafficPermitted=true in network_config.json base-config;\n` +
+        `              component-config.'Network Kit'=true allows plaintext for Network Kit.`;
+      return new ScenarioResult(resp.responseCode === 200,
+        resp.responseCode === 200 ? 'plaintext allowed (component-config true)' : 'plaintext blocked by system',
+        detail, resp.responseCode);
+    } catch (e) {
+      const err = e as BusinessError;
+      return ScenarioResult.error('NetworkKit nsc-cleartext', err as Error);
+    } finally {
+      req.destroy();
+    }
+  }
 }

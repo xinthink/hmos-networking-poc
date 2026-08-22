@@ -39,6 +39,8 @@ Network Kit（http）。
 | 7 | Cache + ETag (条件请求/304) | 实测**未发送 If-None-Match**，两次均 200 走网络 | 实测 If-None-Match → 304 → 复用缓存 ✅ |
 | 8 | Multipart/form-data 上传 | `multiFormDataList` (API 11) | `rcp.MultipartForm`（原生） |
 | 9 | 二进制上传 octet-stream | `extraData: ArrayBuffer` | `ArrayBuffer` 请求体 |
+| 10 | 网络安全配置: trust-anchors | 无代码级 `caData`，纯靠 `network_config.json` 信任锚点（实测✅） | 无代码级 `remoteValidation`（实测❌，需代码级配置） |
+| 11 | 网络安全配置: 明文权限 | `component-config."Network Kit"` 默认受控 | `component-config."Remote Communication Kit"` 默认不受控（API 23 起可配置） |
 
 ## 快速开始
 
@@ -87,8 +89,8 @@ App 首页顶部可修改服务器地址：
 
 ## 模拟器实测状态（HarmonyOS 6.1.1 / API 24, Pura 90 emulator）
 
-✅ 全部 9 个场景已在本机模拟器上端到端跑通（App → Mock Server，两个框架并排对比）。
-实测发现的三个关键差异（详见 [COMPARISON.md](./COMPARISON.md)）：
+✅ 全部 11 个场景已在本机模拟器上端到端跑通（App → Mock Server，两个框架并排对比）。
+实测发现的四个关键差异（详见 [COMPARISON.md](./COMPARISON.md)）：
 
 1. **HTTP/1.1 下 header 大小写行为不同**：Network Kit 会把自定义 header 名统一转成
    小写再发送（服务端收到 `x-allcaps-hdr`）；RCP 保留开发者传入的大小写
@@ -102,6 +104,13 @@ App 首页顶部可修改服务器地址：
      ETag 重新验证未生效。
 3. **Network Kit 的 cookies 字段是 Netscape cookie-file 格式**（tab 分隔），不是
    `name=value;` 格式，手动解析时需特殊处理（RCP 的 CookieRepository 无此问题）。
+4. **网络安全配置（network_config.json）支持不同**：
+   - **trust-anchors（应用级信任 CA）**：Network Kit **遵循**（base-config 与
+     domain-config 都需配置，无代码级 `caData` 时 HTTPS 成功）；RCP **不遵循**，
+     必须用代码级 `remoteValidation` 指定 CA。
+   - **明文控制（component-config）**：两框架都受系统明文禁令约束，但
+     `"Network Kit"` 默认受控（true）、`"Remote Communication Kit"` 默认**不受控**
+     （false，API 23 起支持配置）——默认配置下全局禁明文只拦截 Network Kit。
 
 ## 目录结构
 
@@ -118,6 +127,9 @@ App 首页顶部可修改服务器地址：
 └── network-compare/              # HarmonyOS App（独立工程）
     ├── README.md                 # 面向使用者
     ├── AGENTS.md                 # 面向代理
+    ├── entry/src/main/resources/
+    │   ├── base/profile/network_config.json   # 网络安全配置（明文/信任锚点）
+    │   └── resfile/mock-ca/                   # 应用级信任 CA 证书（cert.pem + <hash>.0）
     └── entry/src/main/ets/
         ├── pages/Index.ets              # 对比 UI
         ├── common/AppConfig.ets         # 服务器地址 + 内嵌 CA

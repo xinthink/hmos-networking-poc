@@ -106,6 +106,20 @@ struct Index {
         netKit: NetKitScenarios.binaryUpload,
         rcp: RcpScenarios.binaryUpload,
       },
+      {
+        key: 'nscTrust',
+        title: '网络安全配置: trust-anchors (应用级信任 CA)',
+        desc: 'network_config.json base-config.trust-anchors 指向 resfile/mock-ca。本场景不带任何代码级 CA（Network Kit 无 caData，RCP 无 remoteValidation），成功则证明系统级信任锚点对该框架生效。',
+        netKit: NetKitScenarios.nscTrustAnchors,
+        rcp: RcpScenarios.nscTrustAnchors,
+      },
+      {
+        key: 'nscCleartext',
+        title: '网络安全配置: 明文权限 (component-config)',
+        desc: 'network_config.json 配置 cleartextTrafficPermitted=true 且 component-config 按框架开启明文（Network Kit / Remote Communication Kit 均可分别控制，API 23+ 支持 RCP）。此处探测当前明文权限是否生效。',
+        netKit: NetKitScenarios.nscCleartext,
+        rcp: RcpScenarios.nscCleartext,
+      },
     ];
   }
 
