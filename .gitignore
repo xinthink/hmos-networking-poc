@@ -1,0 +1,17 @@
+# Node
+node_modules/
+
+# TLS private keys (never commit)
+mock-server/certs/key.pem
+
+# HarmonyOS / DevEco build outputs
+network-compare/**/build/
+network-compare/**/.hvigor/
+network-compare/**/.cxx/
+network-compare/**/oh_modules/
+network-compare/.idea/
+network-compare/.hvigor/
+network-compare/oh-package-lock.json5
+
+# OS
+.DS_Store
