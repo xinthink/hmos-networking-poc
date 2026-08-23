@@ -62,7 +62,12 @@ Cookie、Cache（含 ETag）、Multipart、二进制上传等差异。
 `hmos-arkts-knowledge-retriever`、`hmos-arkts-syntax-checker`、
 `hmos-arkts-deprecated-interface-checker`、`hmos-arkui-develop-skill`、
 `hmos-arkui-knowledge-retriever`、`hmos-arkui-statemgt-migration`、
-`deveco-studio-codelinter`。
+`deveco-studio-codelinter`。另有本地安装的 `cangjie-coding`（仓颉语言知识库，
+来源：`/ws/lrn/HMOS/CangjieSkills`，直接复制其 `.agents/skills/cangjie-coding`）。
+
+⚠️ **`cangjie-coding` 的脚本要求 Python 3.10+**（`str | None` 注解），系统默认
+`python3`（3.9）会报错，必须用 `python3.11`（或更高）调用
+`scripts/search_docs.py` / `scripts/setup_stdx.py`。
 
 **DSH 只扫描以下技能根目录**（源码见 skill-filesystem `roots()`）：
 
