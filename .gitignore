@@ -13,5 +13,16 @@ network-compare/.idea/
 network-compare/.hvigor/
 network-compare/oh-package-lock.json5
 
+# AI agent local dirs (installed by devecocli --project; DSH does NOT read them).
+# Keep ONLY .agents/skills under version control (DSH project skills).
+.claude-code/
+.opencode/
+.codex/
+.claude/
+.cursor/
+.codebuddy/
+.qoder/
+.trae-cn/
+
 # OS
 .DS_Store
