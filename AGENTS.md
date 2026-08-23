@@ -58,49 +58,27 @@ Cookie、Cache（含 ETag）、Multipart、二进制上传等差异。
 
 ## 工程级 Skills（DSH 识别机制）
 
-本仓库使用 devecocli 安装 ArkTS/ArkUI 相关 skills（已装于 `.agents/skills/`）：
-`hmos-arkts-knowledge-retriever`、`hmos-arkts-syntax-checker`、
-`hmos-arkts-deprecated-interface-checker`、`hmos-arkui-develop-skill`、
-`hmos-arkui-knowledge-retriever`、`hmos-arkui-statemgt-migration`、
-`deveco-studio-codelinter`。另有本地安装的 `cangjie-coding`（仓颉语言知识库，
-来源：`/ws/lrn/HMOS/CangjieSkills`，直接复制其 `.agents/skills/cangjie-coding`）。
+已安装于 `.agents/skills/`（DSH 唯一识别的工程技能目录）：
+- **ArkTS/ArkUI**（devecocli 安装）：`hmos-arkts-knowledge-retriever`、
+  `hmos-arkts-syntax-checker`、`hmos-arkts-deprecated-interface-checker`、
+  `hmos-arkui-develop-skill`、`hmos-arkui-knowledge-retriever`、
+  `hmos-arkui-statemgt-migration`、`deveco-studio-codelinter`
+- **仓颉**（本地复制，自包含，不依赖外部目录）：`cangjie-coding`
 
-⚠️ **`cangjie-coding` 的脚本要求 Python 3.10+**（`str | None` 注解），系统默认
-`python3`（3.9）会报错。
+### 执行 skill 脚本（强制）
 
-### 执行 skill 脚本的统一规则（强制）
+所有 skill 脚本用工程 venv 执行：`.venv/bin/python <script> ...`
+（venv 位于仓库根 `.venv/`，Python 3.11；**勿用系统 `python3`**——本机为 3.9，
+无法运行 `cangjie-coding` 脚本的 `str | None` 注解。venv 已 gitignore，缺失时
+`python3.11 -m venv .venv` 重建；新增第三方依赖时 pip 装进该 venv 并在此记录。）
 
-**本工程所有 skill 脚本一律用工程内的 virtual env 执行**：
+### 新增技能
 
-```bash
-# venv 已创建于仓库根 .venv/（Python 3.11.10，Python 3.10+）
-.venv/bin/python .agents/skills/cangjie-coding/scripts/search_docs.py --query "..." 
-.venv/bin/python .agents/skills/cangjie-coding/scripts/setup_stdx.py --project <path>
-```
-
-- **不要**用系统 `python3`（本机为 3.9.6，无法运行 `str | None` 注解）执行 skill 脚本。
-- venv 路径：`<projectRoot>/.venv/`，已加入 `.gitignore`（不提交）。
-- 若 venv 缺失（如新 clone），重建：`python3.11 -m venv .venv`（本机有 3.10–3.13）。
-- 若某 skill 脚本需要第三方依赖，先 `pip install` 进该 venv，并记录到 AGENTS.md。
-
-**DSH 只扫描以下技能根目录**（源码见 skill-filesystem `roots()`）：
-
-| 目录 | 来源 |
-|------|------|
-| `<projectRoot>/.dsh/skills` | project-dsh |
-| `<projectRoot>/.agents/skills` | project-agents（本项目使用） |
-| `~/.dsh/skills` | user-dsh |
-| `~/.agents/skills` | user-agents |
-
-⚠️ **安装命令注意**：
-- `devecocli skills add --skill <name> --project .` 会把技能装到
-  `.<agentName>/skills`（如 `.claude-code/skills`、`.opencode/skills`、
-  `.codex/skills`）——这些目录 **DSH 不识别**，只对对应 agent 工具有效。
-- 要让 DSH 在工程内识别，必须用：
-  ```bash
-  devecocli skills add --skill <name> --path "$PWD/.agents/skills"
-  ```
-  （`--path` 与 `--project`/`--agent` 互斥；`--path` 要求目录已存在。）
+- 技能放 `<projectRoot>/.agents/skills/<name>/`（含 `SKILL.md`）即被 DSH 识别；
+  用户级放 `~/.agents/skills/`。
+- devecocli 安装用 `devecocli skills add --skill <name> --path "$PWD/.agents/skills"`
+  （**勿用 `--project .`**：会装到 `.<agentName>/skills`（如 `.claude-code/skills`），
+  DSH 不识别）。
 
 ## 常用命令（速查）
 
