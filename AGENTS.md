@@ -66,8 +66,22 @@ Cookie、Cache（含 ETag）、Multipart、二进制上传等差异。
 来源：`/ws/lrn/HMOS/CangjieSkills`，直接复制其 `.agents/skills/cangjie-coding`）。
 
 ⚠️ **`cangjie-coding` 的脚本要求 Python 3.10+**（`str | None` 注解），系统默认
-`python3`（3.9）会报错，必须用 `python3.11`（或更高）调用
-`scripts/search_docs.py` / `scripts/setup_stdx.py`。
+`python3`（3.9）会报错。
+
+### 执行 skill 脚本的统一规则（强制）
+
+**本工程所有 skill 脚本一律用工程内的 virtual env 执行**：
+
+```bash
+# venv 已创建于仓库根 .venv/（Python 3.11.10，Python 3.10+）
+.venv/bin/python .agents/skills/cangjie-coding/scripts/search_docs.py --query "..." 
+.venv/bin/python .agents/skills/cangjie-coding/scripts/setup_stdx.py --project <path>
+```
+
+- **不要**用系统 `python3`（本机为 3.9.6，无法运行 `str | None` 注解）执行 skill 脚本。
+- venv 路径：`<projectRoot>/.venv/`，已加入 `.gitignore`（不提交）。
+- 若 venv 缺失（如新 clone），重建：`python3.11 -m venv .venv`（本机有 3.10–3.13）。
+- 若某 skill 脚本需要第三方依赖，先 `pip install` 进该 venv，并记录到 AGENTS.md。
 
 **DSH 只扫描以下技能根目录**（源码见 skill-filesystem `roots()`）：
 

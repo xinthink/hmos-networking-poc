@@ -1,6 +1,9 @@
 # Node
 node_modules/
 
+# Python virtual env (used for skill scripts)
+.venv/
+
 # TLS private keys (never commit)
 mock-server/certs/key.pem
 
