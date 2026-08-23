@@ -56,6 +56,33 @@ Cookie、Cache（含 ETag）、Multipart、二进制上传等差异。
 > 已有子工程即本规范的最佳范例：`mock-server/README.md` + `mock-server/AGENTS.md`、
 > `network-compare/README.md` + `network-compare/AGENTS.md`，均按本流程分层维护。
 
+## 工程级 Skills（DSH 识别机制）
+
+本仓库使用 devecocli 安装 ArkTS/ArkUI 相关 skills（已装于 `.agents/skills/`）：
+`hmos-arkts-knowledge-retriever`、`hmos-arkts-syntax-checker`、
+`hmos-arkts-deprecated-interface-checker`、`hmos-arkui-develop-skill`、
+`hmos-arkui-knowledge-retriever`、`hmos-arkui-statemgt-migration`、
+`deveco-studio-codelinter`。
+
+**DSH 只扫描以下技能根目录**（源码见 skill-filesystem `roots()`）：
+
+| 目录 | 来源 |
+|------|------|
+| `<projectRoot>/.dsh/skills` | project-dsh |
+| `<projectRoot>/.agents/skills` | project-agents（本项目使用） |
+| `~/.dsh/skills` | user-dsh |
+| `~/.agents/skills` | user-agents |
+
+⚠️ **安装命令注意**：
+- `devecocli skills add --skill <name> --project .` 会把技能装到
+  `.<agentName>/skills`（如 `.claude-code/skills`、`.opencode/skills`、
+  `.codex/skills`）——这些目录 **DSH 不识别**，只对对应 agent 工具有效。
+- 要让 DSH 在工程内识别，必须用：
+  ```bash
+  devecocli skills add --skill <name> --path "$PWD/.agents/skills"
+  ```
+  （`--path` 与 `--project`/`--agent` 互斥；`--path` 要求目录已存在。）
+
 ## 常用命令（速查）
 
 ```bash
