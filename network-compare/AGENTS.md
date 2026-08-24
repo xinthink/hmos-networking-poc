@@ -1,18 +1,19 @@
 # AGENTS.md — network-compare
 
 HarmonyOS App（bundle `com.example.networkcompare`，targetSdk `6.1.1(24)` / API 24），
-对比 UI + 双框架 runner。改动前先读本文件，并读仓库根 `../AGENTS.md` 的
-"跨工程约定"与"已实测结论"。
+对比 UI + 三框架 runner（Network Kit / RCP / Axios）。改动前先读本文件，并读仓库根
+`../AGENTS.md` 的"跨工程约定"与"已实测结论"。
 
 ## 目录结构（entry/src/main/ets/）
 
 ```
 ets/
-├── pages/Index.ets               # 对比 UI：场景卡片列表 + Network Kit/RCP 并排结果
+├── pages/Index.ets               # 对比 UI：场景卡片列表 + Network Kit/RCP/Axios 三列结果
 ├── common/AppConfig.ets          # 服务器 host/端口 + 内嵌 CA PEM（MOCK_CA_PEM）
 ├── model/ScenarioResult.ets      # 场景结果模型（ok/summary/detail/statusCode）
 ├── netkit/NetKitScenarios.ets    # Network Kit (@kit.NetworkKit) 场景实现
-└── rcp/RcpScenarios.ets          # RCP (@kit.RemoteCommunicationKit) 场景实现
+├── rcp/RcpScenarios.ets          # RCP (@kit.RemoteCommunicationKit) 场景实现
+└── axios/AxiosScenarios.ets      # @ohos/axios 场景实现（见下方 Axios 特有事实）
 ```
 
 ## 常用命令（在 network-compare/ 下执行）
@@ -28,9 +29,9 @@ devecocli log --device "Pura 90" --bundle-name com.example.networkcompare --from
 
 ## 架构约定：如何新增一个对比场景
 
-两套框架的 runner 采用**镜像方法**结构：每个场景在 `NetKitScenarios.ets` 与
-`RcpScenarios.ets` 中各有一个同名 `static async` 方法，返回 `Promise<ScenarioResult>`，
-UI 上一张卡片并排展示两者结果。
+三套框架的 runner 采用**镜像方法**结构：每个场景在 `NetKitScenarios.ets`、
+`RcpScenarios.ets` 与 `AxiosScenarios.ets` 中各有一个同名 `static async` 方法，
+返回 `Promise<ScenarioResult>`，UI 上一张卡片并排展示三者结果。
 
 新增场景步骤：
 
@@ -40,9 +41,14 @@ UI 上一张卡片并排展示两者结果。
 3. **RcpScenarios.ets**：加同名 `static async xxx()`，用 `rcp.createSession()` +
    `session.get/post/fetch(...)`；`finally { session.close(); }`（session 有数量上限，
    用完必须关）。
-4. **pages/Index.ets**：在 `scenarios()` 数组加卡片，`key` 唯一，`netKit` / `rcp`
-   指向上述方法（RCP 需要 `filesDir` 的场景用闭包 `() => RcpScenarios.xxx(this.filesDir)`）。
-5. 构建 → 部署 → 模拟器点击验证（见"验证流程"）。
+4. **AxiosScenarios.ets**：加同名 `static async xxx()`，用 `axios.get/post/...` +
+   `AxiosRequestConfig`。⚠️ ArkTS 严格模式要求 axios 泛型**必须写全三个类型参数**
+   （T/R/D，默认值是 `any`/`unknown` 会被编译拒绝），文件顶部已定义
+   `AxiosJsonResp` / `AxiosObjResp` / `AxiosJsonErr` 别名；PATCH 用
+   `axios.request({ method: 'PATCH' })`（2.2.13 的 .d.ts 漏了 `patch` 方法）。
+5. **pages/Index.ets**：在 `scenarios()` 数组加卡片，`key` 唯一，`netKit` / `rcp` /
+   `axios` 指向上述方法（需要 `filesDir` 的场景用闭包 `() => XxxScenarios.xxx(this.filesDir)`）。
+6. 构建 → 部署 → 模拟器点击验证（见"验证流程"）。
 
 ## 关键 API 事实（写代码前必读）
 
@@ -70,7 +76,35 @@ UI 上一张卡片并排展示两者结果。
 - Network Kit：`HttpRequestOptions.caData = AppConfig.MOCK_CA_PEM`。
 - RCP：`Configuration.security.remoteValidation = { content: AppConfig.MOCK_CA_PEM }`
   （`RcpScenarios.newSession()` 已封装）。
+- **Axios：没有 `caData`，只有 `caPath`** —— 需先把 PEM 写到文件再传路径
+  （`AxiosScenarios.ensureCaFile(filesDir)` 已封装，写到 `${filesDir}/mock-ca.pem`）。
 - ⚠️ **若 mock server 重新生成证书，必须同步更新 `MOCK_CA_PEM`**，否则 HTTPS 失败。
+
+### Axios（@ohos/axios 2.2.13）特有事实（写代码前必读）
+- **底层是 Network Kit**：`@ohos/axios` 适配器内部调用 `@ohos.net.http` 的
+  `httpRequest.request(...)`，因此网络行为（h1 header 小写化、明文管控、trust-anchors
+  等）默认跟随 Network Kit，差异来自 axios 层自身。
+- **响应字段被裁剪**：适配器只映射 `result/responseCode/header/performanceTiming`，
+  `response.cookies`、`connectionExtraInfo`（协议版本、`isCacheHit`）都拿不到。
+- **泛型必须写全**：`axios.get<T, R, D>(url, config)` 三个类型参数都要显式给出
+  （默认 `any`/`unknown` 触发 `arkts-no-any-unknown`）；文件顶部别名
+  `AxiosJsonResp`/`AxiosObjResp`/`AxiosJsonErr` 可复用。
+- **.d.ts 缺 `patch`**：2.2.13 的类型定义漏了 `AxiosInstance.patch`（运行时存在），
+  用 `axios.request({ url, method: 'PATCH', data })` 代替（见 `patchRequest()`）。
+- **默认自动 JSON 解析**：不设 `responseType` 时（`expectDataType` 未设置 →
+  net.http 默认 STRING），`transformResponse` 会把 JSON 字符串解析成对象
+  （`forcedJSONParsing=true`）；设 `responseType: 'string'` 则返回原始字符串。
+- **无缓存/ETag 层**：`config.cache` 只对 HttpClient 适配器生效；axios 从不设置
+  `usingCache`（net.http 默认值生效，与 Network Kit 行为一致）。
+- **默认拒绝 304**：`validateStatus` 默认 `200 <= status < 300`，服务端回 304 时
+  promise 会 reject（`AxiosError`，`err.response.status === 304`）；要消费 304 必须
+  自定义 `validateStatus`。
+- **Cookie 手动**：无 cookie jar；`response.cookies` 不透出，需从
+  `resp.headers.get('set-cookie')` 手动解析再回填 `Cookie` header。
+- **Multipart**：用 `axios.FormData`（`form.append(name, value, { filename, type })`），
+  适配器识别 FormData 后走 `requestInStream` + `multiFormDataList`。
+- **ArkTS 编译约束**：`@ohos/axios` 的 `.d.ts` 里有大量 `any`（库自身），我们代码里
+  不能出现；所有 `as AxiosError` 断言用 `as AxiosJsonErr`。
 
 ### 网络安全配置（network_config.json）
 - 配置文件：`entry/src/main/resources/base/profile/network_config.json`；证书目录：

@@ -1,13 +1,15 @@
-# Network Kit vs Remote Communication Kit (RCP) — 对比与替换可行性验证
+# Network Kit vs RCP vs Axios — 对比与替换可行性验证
 
 > 验证 RCP (Remote Communication Kit, `@kit.RemoteCommunicationKit`) 是否可以取代
-> Network Kit 的 HTTP 能力 (`@ohos.net.http` / `@kit.NetworkKit`)。
+> Network Kit 的 HTTP 能力 (`@ohos.net.http` / `@kit.NetworkKit`)，并顺带对比最流行的
+> 三方 HTTP 库 `@ohos/axios`（OpenHarmony 版 Axios，底层封装 `@ohos.net.http`）在同一
+> 批场景上的行为差异。
 
 本仓库包含两个独立工程（后续还会继续添加其他工程）：
 
 | 目录 | 工程 | 说明 |
 |------|------|------|
-| [`network-compare/`](./network-compare) | HarmonyOS 移动 App | 同一套场景分别用 Network Kit 与 RCP 实现，UI 上并排展示结果 |
+| [`network-compare/`](./network-compare) | HarmonyOS 移动 App | 同一套场景分别用 Network Kit、RCP 与 Axios 实现，UI 上三列并排展示结果 |
 | [`mock-server/`](./mock-server) | Node.js Mock Server | 同时提供 HTTP/1.1（8080 明文）与 HTTP/2（8443 TLS/ALPN） |
 
 详细的逐项对比矩阵与可行性结论见 [COMPARISON.md](./COMPARISON.md)。
@@ -22,25 +24,25 @@ HarmonyOS NEXT 提供两套 HTTP 能力：
   新一代远场通信框架，自带会话管理、Cookie 仓库、磁盘缓存、拦截器、流量统计等
   "开箱即用"能力，被官方定位为更现代、更完整的网络栈。
 
-项目目标是：在同一个 App 里用两套框架打同一批接口，量化对比它们在协议覆盖、方法
-支持、Header 正规化、Cookie、Cache、二进制上传上的差异，从而判断 RCP 能否平滑替换
-Network Kit（http）。
+项目目标是：在同一个 App 里用三套框架（Network Kit / RCP / Axios）打同一批接口，
+量化对比它们在协议覆盖、方法支持、Header 正规化、Cookie、Cache、二进制上传上的差异，
+从而判断 RCP 能否平滑替换 Network Kit（http），并看清 Axios 在鸿蒙上的行为边界。
 
 ## 对比场景（App 内一键运行）
 
-| # | 场景 | Network Kit 做法 | RCP 做法 |
-|---|------|------------------|----------|
-| 1 | 协议协商 HTTP/1.1 | `usingProtocol: HttpProtocol.HTTP1_1` | 无显式开关（API 26 前），ALPN 自动协商 |
-| 2 | HTTP/2 (TLS/ALPN) | `usingProtocol: HttpProtocol.HTTP2` + `caData` | 自动协商；`response.httpVersion` 可读 |
-| 3 | REST 方法 GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS | `RequestMethod` 枚举全支持 | `session.get/post/put/head/delete` + `Request(method)` |
-| 4 | Header 正规化（HTTP/2 全小写 vs HTTP/1.1 大小写不敏感） | 透传 header，h2 由框架/协议小写化 | 同左；`RequestHeaders` 类型更严格 |
-| 5 | Cookie | 手动：读 `response.cookies` 再塞回 `Cookie` header | `CookieRepository` (API 23) 自动存取 |
-| 6 | Cache (max-age) | `usingCache: true`（默认开启，实测默认未命中缓存） | 需显式配置 `ResponseCache` (API 20) + `CacheControl` |
-| 7 | Cache + ETag (条件请求/304) | 实测**未发送 If-None-Match**，两次均 200 走网络 | 实测 If-None-Match → 304 → 复用缓存 ✅ |
-| 8 | Multipart/form-data 上传 | `multiFormDataList` (API 11) | `rcp.MultipartForm`（原生） |
-| 9 | 二进制上传 octet-stream | `extraData: ArrayBuffer` | `ArrayBuffer` 请求体 |
-| 10 | 网络安全配置: trust-anchors | 无代码级 `caData`，纯靠 `network_config.json` 信任锚点（实测✅） | 无代码级 `remoteValidation`（实测❌，需代码级配置） |
-| 11 | 网络安全配置: 明文权限 | `component-config."Network Kit"` 默认受控 | `component-config."Remote Communication Kit"` 默认不受控（API 23 起可配置） |
+| # | 场景 | Network Kit 做法 | RCP 做法 | Axios 做法 |
+|---|------|------------------|----------|------------|
+| 1 | 协议协商 HTTP/1.1 | `usingProtocol: HttpProtocol.HTTP1_1` | 无显式开关（API 26 前），ALPN 自动协商 | `usingProtocol`（同 Network Kit） |
+| 2 | HTTP/2 (TLS/ALPN) | `usingProtocol: HTTP2` + `caData` | 自动协商；`response.httpVersion` 可读 | `usingProtocol` + `caPath`（无 caData） |
+| 3 | REST 方法 GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS | `RequestMethod` 枚举全支持 | `session.get/post/put/head/delete` + `Request(method)` | axios 动词全支持（.d.ts 漏 `patch`，用 `request`） |
+| 4 | Header 正规化（HTTP/2 全小写 vs HTTP/1.1 大小写不敏感） | 透传 header，h1 实测转小写 | 同左；保留传入大小写 | AxiosHeaders 保留大小写，底层 net.http 行为同 Network Kit |
+| 5 | Cookie | 手动：读 `response.cookies`（Netscape 格式）再回填 | `CookieRepository` (API 23) 自动存取 | 手动：不透出 cookies 字段，解析 `set-cookie` 头 |
+| 6 | Cache (max-age) | `usingCache: true`（默认开启，实测默认未命中缓存） | 需显式配置 `ResponseCache` (API 20) | 无缓存 API（config.cache 仅 HttpClient 适配器生效） |
+| 7 | Cache + ETag (条件请求/304) | 实测**未发送 If-None-Match** | 实测 If-None-Match → 304 → 复用缓存 ✅ | 无自动 ETag；304 默认被 validateStatus 拒绝 |
+| 8 | Multipart/form-data 上传 | `multiFormDataList` (API 11) | `rcp.MultipartForm`（原生） | `axios.FormData`（内部转 multiFormDataList） |
+| 9 | 二进制上传 octet-stream | `extraData: ArrayBuffer` | `ArrayBuffer` 请求体 | `data: ArrayBuffer` |
+| 10 | 网络安全配置: trust-anchors | 无代码级 `caData`，纯靠 `network_config.json` 信任锚点（实测✅） | 无代码级 `remoteValidation`（实测❌，需代码级配置） | 无代码级 `caPath`，底层走 net.http（预期同 Network Kit） |
+| 11 | 网络安全配置: 明文权限 | `component-config."Network Kit"` 默认受控 | `component-config."Remote Communication Kit"` 默认不受控（API 23 起可配置） | 底层走 net.http，受 `"Network Kit"` 组件配置约束 |
 
 ## 快速开始
 
@@ -66,7 +68,7 @@ App 首页顶部可修改服务器地址：
 - 模拟器：默认 `10.0.2.2`（模拟器访问宿主机回环地址）
 - 真机：改为开发机局域网 IP，如 `192.168.1.5`
 
-### 3. 逐场景点击 "Network Kit" / "RCP" 按钮对比结果
+### 3. 逐场景点击 "Network Kit" / "RCP" / "Axios" 按钮对比结果
 
 ## 已知关键差异（初步结论）
 
@@ -127,6 +129,7 @@ App 首页顶部可修改服务器地址：
 └── network-compare/              # HarmonyOS App（独立工程）
     ├── README.md                 # 面向使用者
     ├── AGENTS.md                 # 面向代理
+    ├── oh-package.json5          # 依赖（含 @ohos/axios）
     ├── entry/src/main/resources/
     │   ├── base/profile/network_config.json   # 网络安全配置（明文/信任锚点）
     │   └── resfile/mock-ca/                   # 应用级信任 CA 证书（cert.pem + <hash>.0）
@@ -135,7 +138,8 @@ App 首页顶部可修改服务器地址：
         ├── common/AppConfig.ets         # 服务器地址 + 内嵌 CA
         ├── model/ScenarioResult.ets     # 结果模型
         ├── netkit/NetKitScenarios.ets   # Network Kit 场景实现
-        └── rcp/RcpScenarios.ets         # RCP 场景实现
+        ├── rcp/RcpScenarios.ets         # RCP 场景实现
+        └── axios/AxiosScenarios.ets     # @ohos/axios 场景实现
 ```
 
 每个子工程均按规范分层维护 `README.md`（面向使用者）+ `AGENTS.md`（面向代理），
