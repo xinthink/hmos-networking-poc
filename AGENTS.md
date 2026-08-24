@@ -120,17 +120,19 @@ devecocli emulator list / start "Pura 90"
 
 ## 已实测结论（全仓库共享，改动相关代码前必读）
 
-| 场景 | Network Kit | RCP |
-|------|-------------|-----|
-| HTTP/1.1 / HTTP/2 (ALPN) | ✅ 显式 `usingProtocol` | ✅ 自动协商 |
-| Header 大小写 (h1) | ⚠️ 发送时统一转小写 | ✅ 保留原大小写 |
-| Header 大小写 (h2) | 全小写（RFC 7540） | 全小写 |
-| Cookie | 手动；`response.cookies` 是 **Netscape cookie-file 格式**（tab 分隔） | `CookieRepository` 自动 |
-| Cache (max-age) | ❌ 默认 `usingCache: true` 实测未命中 | ✅ `ResponseCache` 命中 |
-| Cache + ETag (304) | ❌ 未发送 If-None-Match | ✅ If-None-Match → 304 → 复用缓存 |
-| Multipart / 二进制上传 | ✅ | ✅ |
-| 网络安全配置: trust-anchors | ✅ 遵循 network_config.json 应用级信任锚点（base+domain 都需配置） | ❌ 不遵循；须代码级 `remoteValidation` |
-| 网络安全配置: 明文控制 | ✅ 受 component-config 约束（默认 true=受控） | ✅ 同样受约束，但 `"Remote Communication Kit"` 默认 **false=不受控**（API 23 起可置 true） |
+| 场景 | Network Kit | RCP | Axios (@ohos/axios) |
+|------|-------------|-----|---------------------|
+| HTTP/1.1 / HTTP/2 (ALPN) | ✅ 显式 `usingProtocol` | ✅ 自动协商 | ✅ 显式 `usingProtocol`（同 Network Kit） |
+| Header 大小写 (h1) | ⚠️ 发送时统一转小写 | ✅ 保留原大小写 | ⚠️ 同 Network Kit 全小写（底层走 net.http） |
+| Header 大小写 (h2) | 全小写（RFC 7540） | 全小写 | 全小写 |
+| Cookie | 手动；`response.cookies` 是 **Netscape cookie-file 格式**（tab 分隔） | `CookieRepository` 自动 | 手动；**不透出 cookies 字段**，解析 `set-cookie` 响应头 |
+| Cache (max-age) | ❌ 默认 `usingCache: true` 实测未命中 | ✅ `ResponseCache` 命中 | ❌ 无缓存 API（`config.cache` 仅 HttpClient 适配器），实测未命中 |
+| Cache + ETag (304) | ❌ 未发送 If-None-Match | ✅ If-None-Match → 304 → 复用缓存 | ❌ 无自动；手动可用但 **304 默认被 validateStatus 拒绝** |
+| Multipart / 二进制上传 | ✅ | ✅ | ✅（`axios.FormData` / `data:ArrayBuffer`） |
+| 网络安全配置: trust-anchors | ✅ 遵循 network_config.json 应用级信任锚点（base+domain 都需配置） | ❌ 不遵循；须代码级 `remoteValidation` | ✅ 遵循（跟随 net.http，同 Network Kit） |
+| 网络安全配置: 明文控制 | ✅ 受 component-config 约束（默认 true=受控） | ✅ 同样受约束，但 `"Remote Communication Kit"` 默认 **false=不受控**（API 23 起可置 true） | ✅ 受 `"Network Kit"` 组件配置约束（底层是 net.http） |
+| 协议/缓存/连接可观测性 | ✅ `connectionExtraInfo`（协议名、isCacheHit） | ✅ `httpVersion` / `cacheInfo` | ❌ 仅 `performanceTiming`，**不暴露协议版本/isCacheHit/cookies** |
+| 自动 JSON 解析 | ❌ 手动 `JSON.parse` | ⚠️ `toJSON()` | ✅ 默认自动（`forcedJSONParsing`） |
 
 > ⚠️ 不要因为"看起来奇怪"就擅自"修复"上述差异 —— 它们是本工程要记录和对比的
 > **实测事实**（详见 `COMPARISON.md`）。若要改变实验条件（如给 Network Kit 配置

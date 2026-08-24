@@ -91,28 +91,35 @@ App 首页顶部可修改服务器地址：
 
 ## 模拟器实测状态（HarmonyOS 6.1.1 / API 24, Pura 90 emulator）
 
-✅ 全部 11 个场景已在本机模拟器上端到端跑通（App → Mock Server，两个框架并排对比）。
-实测发现的四个关键差异（详见 [COMPARISON.md](./COMPARISON.md)）：
+✅ 全部 11 个场景已在本机模拟器上端到端跑通（App → Mock Server，**三框架并排对比**）。
+实测发现的关键差异（详见 [COMPARISON.md](./COMPARISON.md)）：
 
 1. **HTTP/1.1 下 header 大小写行为不同**：Network Kit 会把自定义 header 名统一转成
    小写再发送（服务端收到 `x-allcaps-hdr`）；RCP 保留开发者传入的大小写
-   （`X-ALLCAPS-HDR`）。HTTP/2 下两者均小写（协议强制）。
+   （`X-ALLCAPS-HDR`）；**axios 与 Network Kit 一样全小写**（底层走 net.http）。
+   HTTP/2 下三者均小写（协议强制）。
 2. **缓存命中相反（含 ETag）**：
    - max-age 场景：RCP 显式配置的 `ResponseCache` 第二次请求命中缓存（服务端计数
-     不再增加）；Network Kit 默认 `usingCache: true` 下第二次请求仍打到网络。
+     不再增加）；Network Kit 默认 `usingCache: true` 下第二次请求仍打到网络；
+     **axios 无缓存层，两次都走网络**（服务端 delta=2）。
    - **ETag 场景**（`Cache-Control: no-cache` + ETag）：RCP 第 2 次请求正确携带
      `If-None-Match`，服务端回 `304`，RCP 复用缓存（`servedFromCache=true`）；
-     **Network Kit 两次请求均未携带 If-None-Match**（服务端 `ifNoneMatchSeen=0`），
-     ETag 重新验证未生效。
+     **Network Kit 两次请求均未携带 If-None-Match**（服务端 `ifNoneMatchSeen=0`）；
+     **axios 也无自动 ETag，且默认 `validateStatus` 把 304 当错误 reject**（需自定义
+     validateStatus 才能消费）。
 3. **Network Kit 的 cookies 字段是 Netscape cookie-file 格式**（tab 分隔），不是
-   `name=value;` 格式，手动解析时需特殊处理（RCP 的 CookieRepository 无此问题）。
+   `name=value;` 格式，手动解析时需特殊处理（RCP 的 CookieRepository 无此问题；
+   axios 更"裸"——连 `response.cookies` 都不透出，只能解析 `set-cookie` 响应头）。
 4. **网络安全配置（network_config.json）支持不同**：
    - **trust-anchors（应用级信任 CA）**：Network Kit **遵循**（base-config 与
      domain-config 都需配置，无代码级 `caData` 时 HTTPS 成功）；RCP **不遵循**，
-     必须用代码级 `remoteValidation` 指定 CA。
-   - **明文控制（component-config）**：两框架都受系统明文禁令约束，但
+     必须用代码级 `remoteValidation` 指定 CA；**axios 遵循**（跟随 net.http）。
+   - **明文控制（component-config）**：三框架都受系统明文禁令约束，但
      `"Network Kit"` 默认受控（true）、`"Remote Communication Kit"` 默认**不受控**
-     （false，API 23 起支持配置）——默认配置下全局禁明文只拦截 Network Kit。
+     （false，API 23 起支持配置）——默认配置下全局禁明文只拦截 Network Kit 与
+     axios（axios 底层是 net.http）。
+5. **axios 可观测性最弱**：响应不暴露协议版本、`isCacheHit`、`cookies` 字段
+   （只有 `performanceTiming`），客户端看不到连接信息，只能靠服务端回显。
 
 ## 目录结构
 
