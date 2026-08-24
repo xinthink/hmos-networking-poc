@@ -10,6 +10,11 @@
     "deliveryWithInstall": true,
     "installationFree": false,
     "srcEntry": "ohos_app_cangjie_entry.MyAbilityStage",
+    "requestPermissions": [
+      {
+        "name": "ohos.permission.INTERNET"
+      }
+    ],
     "abilities": [
       {
         "name": "EntryAbility",

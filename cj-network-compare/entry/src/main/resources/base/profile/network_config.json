@@ -1,0 +1,33 @@
+{
+  "network-security-config": {
+    "base-config": {
+      "cleartextTrafficPermitted": true,
+      "trust-anchors": [
+        {
+          "certificates": "/data/storage/el1/bundle/entry/resources/resfile/mock-ca"
+        }
+      ]
+    },
+    "domain-config": [
+      {
+        "domains": [
+          {
+            "include-subdomains": true,
+            "name": "10.0.2.2"
+          }
+        ],
+        "cleartextTrafficPermitted": true,
+        "trust-anchors": [
+          {
+            "certificates": "/data/storage/el1/bundle/entry/resources/resfile/mock-ca"
+          }
+        ]
+      }
+    ],
+    "component-config": {
+      "Request": true,
+      "Network Kit": true,
+      "Remote Communication Kit": true
+    }
+  }
+}

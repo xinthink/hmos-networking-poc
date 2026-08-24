@@ -125,6 +125,60 @@
   时**需要显式配置** `component-config."Remote Communication Kit": true` 才能获得同等
   明文管控的关键差异。
 
+## Cangjie 语言视角：RCP 无 Cangjie 绑定，仅 Network Kit 可用
+
+> 子工程 `cj-network-compare/`（纯 Cangjie App）验证了 Cangjie 生态下网络框架的选择面。
+> 结论先行：**Remote Communication Kit 目前没有 Cangjie 绑定**。
+
+- **RCP 无 Cangjie 绑定（已确认）**：API 24 Cangjie SDK（6.1.1，`~/.cangjie-sdk/6.1/cangjie`）
+  的 `kit/` 声明文件共 26 个 kit（`kit.AbilityKit`、`kit.NetworkKit`、`kit.BasicServicesKit`、
+  `kit.CoreFileKit` 等），**没有 `kit.RemoteCommunicationKit`**；`ohos/` 模块下也没有
+  `ohos.net.rcp`。因此 Cangjie 应用**无法使用 RCP**（RCP 仅有 ArkTS 绑定），也就没有
+  "Cangjie 版 RCP" 对比一说——Cangjie 侧只能选 Network Kit（`import kit.NetworkKit.*`，
+  重导出 `ohos.net.http.*`）。
+- Cangjie 版 Network Kit 场景实现于 `cj-network-compare/entry/src/main/cangjie/index.cj`，
+  全部 11 个场景（protocol / protocol2 / methods / headers / cookies / cache / etag /
+  multipart / binary / nscTrust / nscCleartext）在模拟器上实测，行为与 ArkTS 版
+  Network Kit **完全一致**（见下表）。
+
+| 场景 | Cangjie Network Kit 实测（cj-network-compare） | 与 ArkTS 版一致 |
+|------|-----------------------------------------------|-----------------|
+| 协议协商 HTTP/1.1 | ✅ server saw HTTP/1.1（`usingProtocol: HttpProtocol.Http1_1`） | ✅ |
+| HTTP/2 (TLS/ALPN) | ✅ server saw HTTP/2（`usingProtocol: HttpProtocol.Http2` + `caPath`） | ✅ |
+| REST 方法 | ✅ GET/POST/PUT/DELETE/HEAD/OPTIONS 全 200；**PATCH 无法发送** | ⚠️ 见下 |
+| Header 大小写 h1 | ⚠️ 发送时转小写（server 收到 `x-allcaps-hdr`） | ✅ 同 ArkTS |
+| Header 大小写 h2 | ✅ 全小写（RFC 7540） | ✅ |
+| Cookie | ✅ 手动往返；`response.cookies` 为 **Netscape cookie-file 格式** | ✅ 同 ArkTS |
+| Cache (max-age) | ⚠️ 未命中（服务端 delta=2） | ✅ 同 ArkTS |
+| Cache + ETag | ❌ 未发送 If-None-Match（delta 0/0），两次 200 | ✅ 同 ArkTS |
+| Multipart | ✅ partCount=2（文本 + 二进制 part，Network Kit 自动 boundary） | ✅ |
+| 二进制上传 | ✅ 4096 bytes，sha256 与客户端 payload 一致 | ✅ |
+| trust-anchors | ✅ 无 `caPath` 时 HTTPS 成功（network_config.json 生效） | ✅ 同 ArkTS |
+| 明文控制 | ✅ `component-config."Network Kit"` 生效（明文 HTTP 200） | ✅ 同 ArkTS |
+
+**Cangjie Network Kit 与 ArkTS 版的差异（写代码前必读）**：
+
+1. **无 PATCH 且无 customMethod**：Cangjie `RequestMethod` 只有
+   Options/Get/Head/Post/Put/Delete/Trace/Connect，`HttpRequestOptions` 也没有
+   `customMethod` 字段（ArkTS API 24 至少可用 `customMethod` 发 PATCH）。Cangjie 下
+   PATCH 请求**无法发出**，只能等服务端/客户端扩展。
+2. **无 `connectionExtraInfo`**：Cangjie `HttpResponse` 没有 ArkTS 的
+   `connectionExtraInfo`（`networkProtocolName` / `isCacheHit`）。协议版本只能靠
+   mock server `/api/protocol` 回显（server saw），缓存命中只能靠服务端计数 delta。
+3. **无 `caData`（内存 PEM），只有 `caPath`（文件路径）**：HTTPS 自签证书场景需要把
+   PEM 放进 `resfile/mock-ca/`，`caPath` 指向 bundle 只读路径
+   `/data/storage/el1/bundle/entry/resources/resfile/mock-ca/cert.pem`（无需写文件）。
+4. **跨线程更新 @State 会崩溃**：Network Kit 回调在后台线程执行，回调里直接写
+   `@State` 变量触发 `[MTHRD1433]` 崩溃（`null assertThread`）。Cangjie 无
+   `runOnMainThread`/`postTask` 类 API；`index.cj` 用 `std.sync.Monitor` 实现
+   `ResultBridge`：回调线程 `complete()` 写结果，UI 线程 `await()` 阻塞等待后（仍在
+   UI 线程）再更新 `@State`。缺点是 UI 在请求期间阻塞。
+5. **无 JSON 库**：Cangjie 标准库/kit 无 JSON 解析声明（`ohos.encoding.json` 只有
+   二进制无 `.cj.d`），`index.cj` 手写了一个针对 mock server 扁平响应的极简提取器
+   （`jStr`/`jInt`/`jObjEntries`/`jArrElemStr`），不适合通用 JSON。
+6. **`Byte` 即 `UInt8`**：`public type Byte = UInt8`；整数转字节用类型构造函数
+   `UInt8(x)`（Cangjie 无 `.toUInt8()` 方法，数值转换一律用类型构造语法）。
+
 ## 可行性结论（模拟器实测后更新）
 
 - **可平滑替换**：REST 方法、HTTP/1.1/2 协议、Multipart、二进制上传等核心 HTTP

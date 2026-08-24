@@ -8,17 +8,20 @@
 验证 **Remote Communication Kit (RCP, `@kit.RemoteCommunicationKit`)** 是否可以取代
 **Network Kit 的 HTTP 能力 (`@ohos.net.http` / `@kit.NetworkKit`)**。做法：同一套 HTTP
 场景分别用两套框架实现，在模拟器上端到端实测，量化对比协议覆盖、Header 正规化、
-Cookie、Cache（含 ETag）、Multipart、二进制上传等差异。
+Cookie、Cache（含 ETag）、Multipart、二进制上传等差异。另有第三对比对象
+**`@ohos/axios`**（OpenHarmony 版 Axios，底层封装 `@ohos.net.http`），用于观察最流行
+的三方 HTTP 库在同一批场景上的行为差异（详见 `COMPARISON.md`）。
 
 ## 子工程一览（后续会新增其他工程）
 
 | 子工程 | 角色 | 专属指南 | 关键文档 |
 |--------|------|----------|----------|
 | `mock-server/` | Node.js Mock Server：`:8080` 明文 HTTP/1.1 + `:8443` TLS/ALPN（h2+h1），零依赖 | [`mock-server/AGENTS.md`](mock-server/AGENTS.md) | `mock-server/README.md` |
-| `network-compare/` | HarmonyOS App（bundle `com.example.networkcompare`，API 24）：对比 UI + 双框架 runner | [`network-compare/AGENTS.md`](network-compare/AGENTS.md) | [`network-compare/README.md`](network-compare/README.md) |
+| `network-compare/` | HarmonyOS App（bundle `com.example.networkcompare`，API 24）：对比 UI + 三框架 runner（Network Kit / RCP / Axios） | [`network-compare/AGENTS.md`](network-compare/AGENTS.md) | [`network-compare/README.md`](network-compare/README.md) |
+| `cj-network-compare/` | 纯 Cangjie App（bundle `com.example.myapplication`，API 24）：11 个场景用 Cangjie Network Kit 实现（**无 RCP/Axios——RCP 无 Cangjie 绑定**） | [`cj-network-compare/AGENTS.md`](cj-network-compare/AGENTS.md) | [`cj-network-compare/README.md`](cj-network-compare/README.md) |
 
-> 两个子工程是**独立工程**：`network-compare/` 可被 DevEco 单独打开，`mock-server/`
-> 是纯 Node 工程。跨工程协作点见下文"跨工程约定"。
+> 三个子工程都是**独立工程**：两个 App 可被 DevEco 单独打开，`mock-server/` 是纯 Node
+> 工程。跨工程协作点见下文"跨工程约定"。
 
 ## 新增子工程的标准流程（强制约定）
 
@@ -101,14 +104,16 @@ devecocli emulator list / start "Pura 90"
 
 1. **端口固定**：8080（h1 明文）/ 8443（h2 TLS）。改端口须同步
    `mock-server/server.mjs` 与 `network-compare/.../common/AppConfig.ets`。
-2. **证书同步（两处）**：`npm run certs` 重新生成 `mock-server/certs/cert.pem` 后，
-   **必须**同步两处：
+2. **证书同步（三处）**：`npm run certs` 重新生成 `mock-server/certs/cert.pem` 后，
+   **必须**同步三处：
    - `network-compare/.../common/AppConfig.ets` 的 `MOCK_CA_PEM`（代码级信任）；
    - `network-compare/entry/src/main/resources/resfile/mock-ca/` 下的 `cert.pem` 与
-     `openssl x509 -hash` 命名的 `<hash>.0` 副本（network_config.json 系统级信任锚点）。
-3. **场景镜像**：每个对比场景在 App 两侧 runner 中同名成对实现（
-   `NetKitScenarios.xxx` ↔ `RcpScenarios.xxx`），并对应 mock server 的一个或多个端点。
-   新增场景的完整步骤见各子项目 AGENTS.md。
+     `openssl x509 -hash` 命名的 `<hash>.0` 副本（network_config.json 系统级信任锚点）；
+   - `cj-network-compare/entry/src/main/resources/resfile/mock-ca/` 下的同名副本
+     （Cangjie 版 `caPath` 指向 bundle 内的 `cert.pem`，见 cj-network-compare/AGENTS.md）。
+3. **场景镜像**：每个对比场景在 App 各 runner 中同名成对实现（
+   `NetKitScenarios.xxx` ↔ `RcpScenarios.xxx` ↔ `AxiosScenarios.xxx`），并对应
+   mock server 的一个或多个端点。新增场景的完整步骤见各子项目 AGENTS.md。
 4. **服务端可观测计数**：mock server 每个被测端点尽量附带 `/stats` 计数端点
    （如 `/api/cache/stats`、`/api/cache/etag/stats`），App 端通过计数 delta 客观判断
    客户端行为（是否命中缓存、是否发送 If-None-Match）。新增实验保持这个模式。
@@ -130,6 +135,18 @@ devecocli emulator list / start "Pura 90"
 > ⚠️ 不要因为"看起来奇怪"就擅自"修复"上述差异 —— 它们是本工程要记录和对比的
 > **实测事实**（详见 `COMPARISON.md`）。若要改变实验条件（如给 Network Kit 配置
 > `http.createHttpResponseCache()` 后再测缓存），先确认这是新的实验维度，并更新文档。
+
+### Cangjie 版（cj-network-compare）补充结论
+
+- **RCP 无 Cangjie 绑定**：API 24 Cangjie SDK 的 `kit/` 无 `RemoteCommunicationKit`，
+  `ohos/` 无 `net.rcp`；Cangjie 侧只有 Network Kit 可用（RCP 仅 ArkTS）。
+- **Cangjie Network Kit 与 ArkTS 版行为完全一致**：11 个场景全部对齐（缓存未命中、
+  无 If-None-Match、h1 header 小写化、Netscape cookie 格式、trust-anchors/明文控制
+  均与 ArkTS 版 Network Kit 相同）。
+- **Cangjie 特有边界**：`RequestMethod` 无 Patch 且无 `customMethod`；`HttpResponse`
+  无 `connectionExtraInfo`；只有 `caPath`（文件路径）无 `caData`；Network Kit 回调在
+  后台线程、直接写 `@State` 会崩溃（需 `ResultBridge` 跨线程桥）；无 JSON 库。
+  详见 `COMPARISON.md`「Cangjie 语言视角」章节。
 
 ## 端到端验证流程
 
