@@ -12,9 +12,10 @@ import ohos.arkui.state_macro_manage.Component
 import ohos.arkui.state_macro_manage.State
 
 // ============ 跨线程结果桥 ============
-// Network Kit 的网络回调在后台线程执行，而 @State 只能在 UI 主线程修改。
-// 回调线程调用 complete() 写入结果；UI 线程调用 await() 阻塞等待（期间释放锁），
-// 返回后仍在 UI 线程上下文，此时再更新 @State 才是安全的。
+// Network Kit 的网络回调在后台线程执行，场景函数需要在 spawn 后台线程内"同步等待"
+// 回调返回（Cangjie 无 await，必须用阻塞原语）。回调线程调用 complete() 写入结果并
+// notify；等待线程调用 await() 阻塞（期间释放锁），返回后继续执行场景逻辑。
+// UI 更新不经过这里——由 runScenario 经 launch() 调度回主线程后再写 @State。
 class ResultBridge<T> {
     let monitor = Monitor()
     var done: Bool = false
@@ -759,10 +760,23 @@ class EntryView {
     var result: String = "-"
     let scroller = Scroller()
 
+    // 在子线程（spawn）执行场景：fn() 内的网络请求全部在后台线程进行，
+    // UI 线程不阻塞；结果经 UIThread.launch 调度回主线程后再更新 @State
+    // （@State 只能在主线程修改，Network Kit 回调线程直接写会崩 [MTHRD1433]）。
     func runScenario(label: String, fn: () -> String) {
         this.status = label
-        this.result = fn()
-        this.scroller.scrollTo(xOffset: 0, yOffset: 0)
+        this.result = "running..."
+        let that = this
+        spawn {
+            =>
+            let text = fn()
+            launch({
+                =>
+                that.status = "done"
+                that.result = text
+                that.scroller.scrollTo(xOffset: 0, yOffset: 0)
+            })
+        }
     }
 
     func build() {

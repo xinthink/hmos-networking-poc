@@ -38,8 +38,8 @@ devecocli run --device "Pura 90"                 # 构建+安装+启动
 1. **场景函数**：`func runXxx(): String`，内部构造 `HttpRequestOptions` +
    `requestText(url, opt) { v => ... }` 阻塞取回格式化文本。
 2. **`requestText` 是核心壳**：`createHttp()` → `req.request(url, opt) { err, resp =>
-   ... }` → `ResultBridge<String>.await(20s)`。`onResp` 回调在**后台线程**执行并返回
-   显示文本，`await` 后仍在 **UI 线程**更新 `@State`（见踩坑 1）。
+   ... }` → `ResultBridge<String>.await(20s)`。它由 `runScenario` 在 **spawn 后台线程**
+   中调用（UI 线程不阻塞），格式化结果经 `launch` 回主线程更新 `@State`。
 3. **mock server 端点是共享的**：`../mock-server/server.mjs`（:8080 h1 / :8443 h2），
    新增场景先加端点，再在 `index.cj` 加 `runXxx` + UI 按钮（`runScenario(label, fn)`）。
 4. **JSON 解析**：用 `index.cj` 里的极简提取器（`jStr`/`jInt`/`jObjEntries`/
@@ -49,9 +49,12 @@ devecocli run --device "Pura 90"                 # 构建+安装+启动
 ## 关键约束与踩坑清单（写代码前必读）
 
 1. **@State 只能在 UI 主线程修改**：Network Kit 回调在后台线程，回调里直接写
-   `this.status = ...` 会崩（`[MTHRD1433]` / `null assertThread`）。必须用
-   `ResultBridge`（`std.sync.Monitor` wait/notify）把结果从回调线程送回 UI 线程后
-   再更新。UI 会阻塞直到回调返回（readTimeout 兜底 15s）。
+   `this.status = ...` 会崩（`[MTHRD1433]` / `null assertThread`）。正确模式：
+   `runScenario()` 用 `spawn` 把场景放到后台线程执行（UI 不阻塞），结果经
+   `launch({ ... })`（`ohos.base` 顶层函数，"Submit the task to the main thread"，
+   `import kit.ArkUI.*` 可用）调度回主线程后再更新 `@State`。场景内部的请求同步化
+   用 `ResultBridge`（`std.sync.Monitor`）——它只在 spawn 后台线程内等待网络回调，
+   **不参与 UI 线程**。
 2. **RequestMethod 无 Patch**，且 `HttpRequestOptions` 无 `customMethod`：methods
    场景只能覆盖 Get/Post/Put/Delete/Head/Options（+Trace/Connect 枚举存在）。
 3. **`HttpResponse` 无 `connectionExtraInfo`**：协议版本、缓存命中拿不到，只能靠

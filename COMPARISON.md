@@ -169,10 +169,11 @@
    PEM 放进 `resfile/mock-ca/`，`caPath` 指向 bundle 只读路径
    `/data/storage/el1/bundle/entry/resources/resfile/mock-ca/cert.pem`（无需写文件）。
 4. **跨线程更新 @State 会崩溃**：Network Kit 回调在后台线程执行，回调里直接写
-   `@State` 变量触发 `[MTHRD1433]` 崩溃（`null assertThread`）。Cangjie 无
-   `runOnMainThread`/`postTask` 类 API；`index.cj` 用 `std.sync.Monitor` 实现
-   `ResultBridge`：回调线程 `complete()` 写结果，UI 线程 `await()` 阻塞等待后（仍在
-   UI 线程）再更新 `@State`。缺点是 UI 在请求期间阻塞。
+   `@State` 变量触发 `[MTHRD1433]` 崩溃（`null assertThread`）。正确模式（
+   `index.cj` 的 `runScenario`）：`spawn` 把场景放到后台线程执行（**UI 不阻塞**），
+   结果经 `launch({ ... })`（`ohos.base` 顶层函数，"Submit the task to the main
+   thread"，`import kit.ArkUI.*` 可用）调度回主线程后再更新 `@State`；场景内多请求
+   的同步化用 `std.sync.Monitor`（仅后台线程内等待，不参与 UI 线程）。
 5. **无 JSON 库**：Cangjie 标准库/kit 无 JSON 解析声明（`ohos.encoding.json` 只有
    二进制无 `.cj.d`），`index.cj` 手写了一个针对 mock server 扁平响应的极简提取器
    （`jStr`/`jInt`/`jObjEntries`/`jArrElemStr`），不适合通用 JSON。

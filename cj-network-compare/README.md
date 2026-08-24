@@ -53,8 +53,9 @@ devecocli run --device "Pura 90" --skip-build --uninstall
 ## Cangjie 特有难点（写代码前必读）
 
 - **@State 跨线程崩溃**：Network Kit 回调在后台线程，回调里直接写 `@State` 会崩
-  （`[MTHRD1433]`）。`index.cj` 用 `std.sync.Monitor` 实现 `ResultBridge` 跨线程桥：
-  回调线程写结果 → UI 线程阻塞 `await` 后更新。代价是请求期间 UI 阻塞。
+  （`[MTHRD1433]`）。正确模式：`runScenario()` 用 `spawn` 把场景放到后台线程执行
+  （UI 不阻塞），结果经 `launch({ ... })`（`ohos.base` 顶层函数）调度回主线程后
+  更新 `@State`；场景内的多请求同步化用 `std.sync.Monitor`（仅后台线程内等待）。
 - **无 JSON 库**：标准库/kit 无 JSON 解析声明，`index.cj` 手写极简提取器
   （`jStr`/`jInt`/`jObjEntries`/`jArrElemStr`），仅适用于 mock server 的扁平响应。
 - **`Byte` 即 `UInt8`**：数值转换一律用类型构造函数（`UInt8(x)`），无 `.toUInt8()`。
