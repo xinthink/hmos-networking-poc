@@ -2,47 +2,12 @@ package ohos_app_cangjie_entry
 
 import kit.ArkUI.*
 import kit.NetworkKit.*
-import std.sync.Monitor
 import std.core.*
 import std.collection.HashMap
 import std.collection.ArrayList
-import std.math.numeric.*
 import ohos.arkui.state_macro_manage.Entry
 import ohos.arkui.state_macro_manage.Component
 import ohos.arkui.state_macro_manage.State
-
-// ============ 跨线程结果桥 ============
-// Network Kit 的网络回调在后台线程执行，场景函数需要在 spawn 后台线程内"同步等待"
-// 回调返回（Cangjie 无 await，必须用阻塞原语）。回调线程调用 complete() 写入结果并
-// notify；等待线程调用 await() 阻塞（期间释放锁），返回后继续执行场景逻辑。
-// UI 更新不经过这里——由 runScenario 经 launch() 调度回主线程后再写 @State。
-class ResultBridge<T> {
-    let monitor = Monitor()
-    var done: Bool = false
-    var value: T
-
-    init(defValue: T) {
-        value = defValue
-    }
-
-    func complete(v: T) {
-        monitor.lock()
-        value = v
-        done = true
-        monitor.notifyAll()
-        monitor.unlock()
-    }
-
-    func await(timeout: Duration): T {
-        monitor.lock()
-        if (!done) {
-            monitor.wait(timeout: timeout)
-        }
-        let r = value
-        monitor.unlock()
-        return r
-    }
-}
 
 // ============ Mock Server 常量 ============
 let HTTP1_BASE = "http://10.0.2.2:8080"
@@ -360,25 +325,24 @@ func jArrElemInt(s: String, key: String, idx: Int64, sub: String): Int64 {
     return 0
 }
 
-// ============ 请求辅助 ============
-// 发请求并阻塞等待回调；onResp 在回调线程执行，返回要显示的文本
-func requestText(url: String, opt: HttpRequestOptions, onResp: (HttpResponse) -> String): String {
+// ============ 请求辅助（纯回调风格，无阻塞原语） ============
+// 发请求；fmt 在回调线程格式化响应，结果经 onDone 回调。
+// onDone 由 runScenario 传入：内部用 launch() 调度回主线程后再更新 @State。
+func asyncRequest(url: String, opt: HttpRequestOptions, fmt: (HttpResponse) -> String, onDone: (String) -> Unit) {
     let req = createHttp()
-    let bridge = ResultBridge<String>("[timeout]")
     req.request(url, opt) {
         err, resp =>
         var text = ""
         if (let Some(e) <- err) {
             text = "ERROR ${e}"
         } else if (let Some(v) <- resp) {
-            text = onResp(v)
+            text = fmt(v)
         } else {
             text = "no response"
         }
-        bridge.complete(text)
+        onDone(text)
         req.destroy()
     }
-    return bridge.await(20000 * Duration.millisecond)
 }
 
 func strBody(v: HttpResponse): String {
@@ -395,7 +359,7 @@ func acceptHeader(): HashMap<String, String> {
 }
 
 // ============ 场景 1/2: 协议协商 ============
-func runProtocol1(): String {
+func runProtocol1(done: (String) -> Unit) {
     let opt = HttpRequestOptions(
         method: RequestMethod.Get,
         expectDataType: HttpDataType.StringValue,
@@ -404,14 +368,14 @@ func runProtocol1(): String {
         connectTimeout: 15000,
         header: acceptHeader()
     )
-    return requestText("${HTTP1_BASE}/api/protocol", opt) {
+    asyncRequest("${HTTP1_BASE}/api/protocol", opt, {
         v =>
         let s = strBody(v)
         "HTTP ${v.responseCode} | server saw: ${jStr(s, "protocol")} (httpVersion ${jStr(s, "httpVersion")})"
-    }
+    }, done)
 }
 
-func runProtocol2(): String {
+func runProtocol2(done: (String) -> Unit) {
     let opt = HttpRequestOptions(
         method: RequestMethod.Get,
         expectDataType: HttpDataType.StringValue,
@@ -421,11 +385,11 @@ func runProtocol2(): String {
         header: acceptHeader(),
         caPath: CA_PATH
     )
-    return requestText("${HTTPS_BASE}/api/protocol", opt) {
+    asyncRequest("${HTTPS_BASE}/api/protocol", opt, {
         v =>
         let s = strBody(v)
         "HTTP ${v.responseCode} | server saw: ${jStr(s, "protocol")} (httpVersion ${jStr(s, "httpVersion")})\n(client uses caPath=${CA_PATH})"
-    }
+    }, done)
 }
 
 // ============ 场景 3: REST 方法覆盖 ============
@@ -444,18 +408,34 @@ func methodName(m: RequestMethod): String {
     }
 }
 
-func runMethods(): String {
-    let sb = StringBuilder()
+// 6 个方法串行请求：用类封装状态（Cangjie 不允许 lambda 捕获 var 后作为参数传递，
+// 因此用方法递归代替递归闭包）
+class MethodRunner {
     let methods = [RequestMethod.Get, RequestMethod.Post, RequestMethod.Put,
                    RequestMethod.Delete, RequestMethod.Head, RequestMethod.Options]
-    for (m in methods) {
+    let sb = StringBuilder()
+    var idx: Int64 = 0
+    let done: (String) -> Unit
+
+    init(done: (String) -> Unit) {
+        this.done = done
+    }
+
+    func next(): Unit {
+        if (idx >= methods.size) {
+            sb.append("PATCH     -> N/A (Cangjie Network Kit 无 RequestMethod.Patch / customMethod)\n")
+            done(sb.toString())
+            return
+        }
+        let m = methods[idx]
+        idx += 1
         let opt = HttpRequestOptions(
             method: m,
             expectDataType: HttpDataType.StringValue,
             readTimeout: 15000,
             connectTimeout: 15000
         )
-        let line = requestText("${HTTP1_BASE}/api/methods", opt) {
+        asyncRequest("${HTTP1_BASE}/api/methods", opt, {
             v =>
             let s = strBody(v)
             if (s.isEmpty()) {
@@ -463,49 +443,60 @@ func runMethods(): String {
             } else {
                 "${v.responseCode}  server echoed: ${jStr(s, "method")}"
             }
+        }) {
+            line =>
+            sb.append("${methodName(m).padEnd(8)} -> ${line}\n")
+            this.next()
         }
-        sb.append("${methodName(m).padEnd(8)} -> ${line}\n")
     }
-    sb.append("PATCH     -> N/A (Cangjie Network Kit 无 RequestMethod.Patch / customMethod)\n")
-    return sb.toString()
+}
+
+func runMethods(done: (String) -> Unit) {
+    MethodRunner(done).next()
 }
 
 // ============ 场景 4: Header 正规化（大小写） ============
-func runHeaders(): String {
-    let sb = StringBuilder()
-    let targets = [("HTTP/1.1", HTTP1_BASE, HttpProtocol.Http1_1),
-                   ("HTTP/2", HTTPS_BASE, HttpProtocol.Http2)]
-    for (t in targets) {
-        let h = HashMap<String, String>()
-        h.add("Accept", "application/json")
-        h.add("X-MiXeD-CaSe-Hdr", "MixedCaseValue")
-        h.add("x-lowercase-hdr", "lower")
-        h.add("X-ALLCAPS-HDR", "upper")
-        let opt = HttpRequestOptions(
-            method: RequestMethod.Get,
-            expectDataType: HttpDataType.StringValue,
-            usingProtocol: t[2],
-            readTimeout: 15000,
-            connectTimeout: 15000,
-            header: h,
-            caPath: CA_PATH
-        )
-        let line = requestText("${t[1]}/api/headers", opt) {
-            v =>
-            let s = strBody(v)
-            let entries = jObjEntries(s, "wireHeaders")
-            let sb2 = StringBuilder()
-            for (kv in entries) {
-                let k = kv.k.toAsciiLower()
-                if (k.startsWith("x-")) {
-                    sb2.append("    ${kv.k} = ${kv.v}\n")
-                }
+func headersForTarget(label: String, base: String, proto: HttpProtocol, done: (String) -> Unit) {
+    let h = HashMap<String, String>()
+    h.add("Accept", "application/json")
+    h.add("X-MiXeD-CaSe-Hdr", "MixedCaseValue")
+    h.add("x-lowercase-hdr", "lower")
+    h.add("X-ALLCAPS-HDR", "upper")
+    let opt = HttpRequestOptions(
+        method: RequestMethod.Get,
+        expectDataType: HttpDataType.StringValue,
+        usingProtocol: proto,
+        readTimeout: 15000,
+        connectTimeout: 15000,
+        header: h,
+        caPath: CA_PATH
+    )
+    asyncRequest("${base}/api/headers", opt, {
+        v =>
+        let s = strBody(v)
+        let entries = jObjEntries(s, "wireHeaders")
+        let sb2 = StringBuilder()
+        for (kv in entries) {
+            let k = kv.k.toAsciiLower()
+            if (k.startsWith("x-")) {
+                sb2.append("    ${kv.k} = ${kv.v}\n")
             }
-            sb2.toString()
         }
-        sb.append("[${t[0]}] server received header names:\n${line}")
+        sb2.toString()
+    }) {
+        line =>
+        done("[${label}] server received header names:\n${line}")
     }
-    return sb.toString()
+}
+
+func runHeaders(done: (String) -> Unit) {
+    headersForTarget("HTTP/1.1", HTTP1_BASE, HttpProtocol.Http1_1) {
+        line1 =>
+        headersForTarget("HTTP/2", HTTPS_BASE, HttpProtocol.Http2) {
+            line2 =>
+            done("${line1}${line2}")
+        }
+    }
 }
 
 // ============ 场景 5: Cookie 手动往返 ============
@@ -547,7 +538,7 @@ func extractCookieHeader(raw: String): String {
     return String.join(parts.toArray(), delimiter: "; ")
 }
 
-func runCookies(): String {
+func runCookies(done: (String) -> Unit) {
     let getOpt = HttpRequestOptions(
         method: RequestMethod.Get,
         expectDataType: HttpDataType.StringValue,
@@ -555,30 +546,32 @@ func runCookies(): String {
         connectTimeout: 15000,
         header: acceptHeader()
     )
-    let rawCookies = requestText("${HTTP1_BASE}/api/cookie/set", getOpt) {
-        v => v.cookies
+    asyncRequest("${HTTP1_BASE}/api/cookie/set", getOpt, { v => v.cookies }) {
+        rawCookies =>
+        let cookieHeader = extractCookieHeader(rawCookies)
+        let h = HashMap<String, String>()
+        h.add("Cookie", cookieHeader)
+        let readOpt = HttpRequestOptions(
+            method: RequestMethod.Get,
+            expectDataType: HttpDataType.StringValue,
+            readTimeout: 15000,
+            connectTimeout: 15000,
+            header: h
+        )
+        asyncRequest("${HTTP1_BASE}/api/cookie/read", readOpt, {
+            v =>
+            let s = strBody(v)
+            "server saw Cookie: ${jStr(s, "cookieHeader")}"
+        }) {
+            readLine =>
+            let rawTrim = if (rawCookies.size > 50) { substr(rawCookies, 0, 50) } else { rawCookies }
+            done("Set-Cookie(raw,trim): ${rawTrim}\n${readLine}")
+        }
     }
-    let cookieHeader = extractCookieHeader(rawCookies)
-    let h = HashMap<String, String>()
-    h.add("Cookie", cookieHeader)
-    let readOpt = HttpRequestOptions(
-        method: RequestMethod.Get,
-        expectDataType: HttpDataType.StringValue,
-        readTimeout: 15000,
-        connectTimeout: 15000,
-        header: h
-    )
-    let readLine = requestText("${HTTP1_BASE}/api/cookie/read", readOpt) {
-        v =>
-        let s = strBody(v)
-        "server saw Cookie: ${jStr(s, "cookieHeader")}"
-    }
-    let rawTrim = if (rawCookies.size > 50) { substr(rawCookies, 0, 50) } else { rawCookies }
-    return "Set-Cookie(raw,trim): ${rawTrim}\n${readLine}"
 }
 
 // ============ 场景 6: Cache（服务端计数 delta 判断是否命中） ============
-func getCacheStats(): Int64 {
+func getCacheStats(onDone: (Int64) -> Unit) {
     let opt = HttpRequestOptions(
         method: RequestMethod.Get,
         expectDataType: HttpDataType.StringValue,
@@ -586,32 +579,40 @@ func getCacheStats(): Int64 {
         connectTimeout: 15000,
         header: acceptHeader()
     )
-    let body = requestText("${HTTP1_BASE}/api/cache/stats", opt) { v => strBody(v) }
-    return jInt(body, "networkHits")
+    asyncRequest("${HTTP1_BASE}/api/cache/stats", opt, { v => strBody(v) }) {
+        body =>
+        onDone(jInt(body, "networkHits"))
+    }
 }
 
-func runCache(): String {
-    let before = getCacheStats()
+func runCache(done: (String) -> Unit) {
     let sb = StringBuilder()
-    for (i in 1..=2) {
-        let opt = HttpRequestOptions(
-            method: RequestMethod.Get,
-            expectDataType: HttpDataType.StringValue,
-            usingCache: true,
-            readTimeout: 15000,
-            connectTimeout: 15000,
-            header: acceptHeader()
-        )
-        let line = requestText("${HTTP1_BASE}/api/cache", opt) {
-            v => "req #${i}: status=${v.responseCode}"
+    let cacheOpt = HttpRequestOptions(
+        method: RequestMethod.Get,
+        expectDataType: HttpDataType.StringValue,
+        usingCache: true,
+        readTimeout: 15000,
+        connectTimeout: 15000,
+        header: acceptHeader()
+    )
+    getCacheStats {
+        before =>
+        asyncRequest("${HTTP1_BASE}/api/cache", cacheOpt, { v => "req #1: status=${v.responseCode}" }) {
+            line1 =>
+            sb.append("${line1}\n")
+            asyncRequest("${HTTP1_BASE}/api/cache", cacheOpt, { v => "req #2: status=${v.responseCode}" }) {
+                line2 =>
+                sb.append("${line2}\n")
+                getCacheStats {
+                    after =>
+                    let delta = after - before
+                    sb.append("server network hits: before=${before} after=${after} delta=${delta}\n")
+                    sb.append("(delta=0 => 第 2 次请求由客户端缓存服务；delta=1 => 两次都打到网络)")
+                    done(sb.toString())
+                }
+            }
         }
-        sb.append("${line}\n")
     }
-    let after = getCacheStats()
-    let delta = after - before
-    sb.append("server network hits: before=${before} after=${after} delta=${delta}\n")
-    sb.append("(delta=0 => 第 2 次请求由客户端缓存服务；delta=1 => 两次都打到网络)")
-    return sb.toString()
 }
 
 // ============ 场景 7: Cache + ETag（条件请求 / 304） ============
@@ -626,7 +627,7 @@ class EtagStats {
     }
 }
 
-func getEtagStats(): EtagStats {
+func getEtagStats(onDone: (EtagStats) -> Unit) {
     let opt = HttpRequestOptions(
         method: RequestMethod.Get,
         expectDataType: HttpDataType.StringValue,
@@ -634,43 +635,51 @@ func getEtagStats(): EtagStats {
         connectTimeout: 15000,
         header: acceptHeader()
     )
-    let body = requestText("${HTTP1_BASE}/api/cache/etag/stats", opt) { v => strBody(v) }
-    return EtagStats(jInt(body, "full200"), jInt(body, "notModified304"), jInt(body, "ifNoneMatchSeen"))
+    asyncRequest("${HTTP1_BASE}/api/cache/etag/stats", opt, { v => strBody(v) }) {
+        body =>
+        onDone(EtagStats(jInt(body, "full200"), jInt(body, "notModified304"), jInt(body, "ifNoneMatchSeen")))
+    }
 }
 
-func runEtag(): String {
-    let before = getEtagStats()
+func runEtag(done: (String) -> Unit) {
     let sb = StringBuilder()
-    for (i in 1..=2) {
-        let opt = HttpRequestOptions(
-            method: RequestMethod.Get,
-            expectDataType: HttpDataType.StringValue,
-            usingCache: true,
-            readTimeout: 15000,
-            connectTimeout: 15000,
-            header: acceptHeader()
-        )
-        let line = requestText("${HTTP1_BASE}/api/cache/etag", opt) {
-            v => "req #${i}: status=${v.responseCode}"
+    let opt = HttpRequestOptions(
+        method: RequestMethod.Get,
+        expectDataType: HttpDataType.StringValue,
+        usingCache: true,
+        readTimeout: 15000,
+        connectTimeout: 15000,
+        header: acceptHeader()
+    )
+    getEtagStats {
+        before =>
+        asyncRequest("${HTTP1_BASE}/api/cache/etag", opt, { v => "req #1: status=${v.responseCode}" }) {
+            line1 =>
+            sb.append("${line1}\n")
+            asyncRequest("${HTTP1_BASE}/api/cache/etag", opt, { v => "req #2: status=${v.responseCode}" }) {
+                line2 =>
+                sb.append("${line2}\n")
+                getEtagStats {
+                    after =>
+                    let dInm = after.ifNoneMatchSeen - before.ifNoneMatchSeen
+                    let d304 = after.notModified304 - before.notModified304
+                    sb.append("server stats before: 200=${before.full200} 304=${before.notModified304} inm=${before.ifNoneMatchSeen}\n")
+                    sb.append("server stats after : 200=${after.full200} 304=${after.notModified304} inm=${after.ifNoneMatchSeen}\n")
+                    sb.append("delta: ifNoneMatchSeen=${dInm} notModified304=${d304}\n")
+                    if (dInm > 0 && d304 > 0) {
+                        sb.append("=> ETag 条件请求生效（客户端发了 If-None-Match，服务端回 304）")
+                    } else {
+                        sb.append("=> ETag 未生效（未发送 If-None-Match）")
+                    }
+                    done(sb.toString())
+                }
+            }
         }
-        sb.append("${line}\n")
     }
-    let after = getEtagStats()
-    let dInm = after.ifNoneMatchSeen - before.ifNoneMatchSeen
-    let d304 = after.notModified304 - before.notModified304
-    sb.append("server stats before: 200=${before.full200} 304=${before.notModified304} inm=${before.ifNoneMatchSeen}\n")
-    sb.append("server stats after : 200=${after.full200} 304=${after.notModified304} inm=${after.ifNoneMatchSeen}\n")
-    sb.append("delta: ifNoneMatchSeen=${dInm} notModified304=${d304}\n")
-    if (dInm > 0 && d304 > 0) {
-        sb.append("=> ETag 条件请求生效（客户端发了 If-None-Match，服务端回 304）")
-    } else {
-        sb.append("=> ETag 未生效（未发送 If-None-Match）")
-    }
-    return sb.toString()
 }
 
 // ============ 场景 8: Multipart/form-data 上传 ============
-func runMultipart(): String {
+func runMultipart(done: (String) -> Unit) {
     let bin = Array<Byte>(256) { i => UInt8(i % 128) }
     let h = HashMap<String, String>()
     h.add("Content-Type", "multipart/form-data")
@@ -685,7 +694,7 @@ func runMultipart(): String {
             MultiFormData("file1", "application/octet-stream", remoteFileName: "cangjie.bin", data: HttpData.ArrayData(bin))
         ]
     )
-    return requestText("${HTTP1_BASE}/api/upload/multipart", opt) {
+    asyncRequest("${HTTP1_BASE}/api/upload/multipart", opt, {
         v =>
         let s = strBody(v)
         let sb = StringBuilder()
@@ -695,11 +704,11 @@ func runMultipart(): String {
             sb.append("  part name=${jArrElemStr(s, "parts", i, "name")} filename=${jArrElemStr(s, "parts", i, "filename")} size=${jArrElemInt(s, "parts", i, "size")} type=${jArrElemStr(s, "parts", i, "contentType")}\n")
         }
         sb.toString()
-    }
+    }, done)
 }
 
 // ============ 场景 9: 二进制上传（octet-stream） ============
-func runBinary(): String {
+func runBinary(done: (String) -> Unit) {
     let payload = Array<Byte>(4096) { i => UInt8((i * 31) % 128) }
     let opt = HttpRequestOptions(
         method: RequestMethod.Post,
@@ -708,16 +717,16 @@ func runBinary(): String {
         connectTimeout: 15000,
         extraData: HttpData.ArrayData(payload)
     )
-    return requestText("${HTTP1_BASE}/api/upload/binary", opt) {
+    asyncRequest("${HTTP1_BASE}/api/upload/binary", opt, {
         v =>
         let s = strBody(v)
         "HTTP ${v.responseCode} | bytes=${jInt(s, "bytes")} sha256=${jStr(s, "sha256")}\nserver saw content-type: ${jStr(s, "contentType")}"
-    }
+    }, done)
 }
 
 // ============ 场景 10: 网络安全配置 trust-anchors ============
 // 不发代码级 caPath —— 信任来自 network_config.json base-config.trust-anchors
-func runNscTrust(): String {
+func runNscTrust(done: (String) -> Unit) {
     let opt = HttpRequestOptions(
         method: RequestMethod.Get,
         expectDataType: HttpDataType.StringValue,
@@ -726,16 +735,16 @@ func runNscTrust(): String {
         connectTimeout: 15000,
         header: acceptHeader()
     )
-    return requestText("${HTTPS_BASE}/api/protocol", opt) {
+    asyncRequest("${HTTPS_BASE}/api/protocol", opt, {
         v =>
         let s = strBody(v)
         "HTTP ${v.responseCode} | server saw: ${jStr(s, "protocol")}\nnote: 未传 caPath，信任来自 network_config.json trust-anchors"
-    }
+    }, done)
 }
 
 // ============ 场景 11: 网络安全配置 明文权限 ============
 // component-config."Network Kit"=true 时允许明文 HTTP；被禁时 Network Kit 报 2300997
-func runNscCleartext(): String {
+func runNscCleartext(done: (String) -> Unit) {
     let opt = HttpRequestOptions(
         method: RequestMethod.Get,
         expectDataType: HttpDataType.StringValue,
@@ -743,11 +752,11 @@ func runNscCleartext(): String {
         connectTimeout: 15000,
         header: acceptHeader()
     )
-    return requestText("${HTTP1_BASE}/api/protocol", opt) {
+    asyncRequest("${HTTP1_BASE}/api/protocol", opt, {
         v =>
         let s = strBody(v)
         "HTTP ${v.responseCode} | server saw: ${jStr(s, "protocol")}\nnote: cleartextTrafficPermitted=true + component-config.'Network Kit'=true"
-    }
+    }, done)
 }
 
 // ============ UI ============
@@ -760,23 +769,22 @@ class EntryView {
     var result: String = "-"
     let scroller = Scroller()
 
-    // 在子线程（spawn）执行场景：fn() 内的网络请求全部在后台线程进行，
-    // UI 线程不阻塞；结果经 UIThread.launch 调度回主线程后再更新 @State
+    // 异步场景入口：fn(done) 在后台线程完成网络请求（UI 不阻塞）；
+    // done 内部经 launch()（ohos.base 顶层函数）调度回主线程后再更新 @State
     // （@State 只能在主线程修改，Network Kit 回调线程直接写会崩 [MTHRD1433]）。
-    func runScenario(label: String, fn: () -> String) {
+    func runScenario(label: String, fn: ((String) -> Unit) -> Unit) {
         this.status = label
         this.result = "running..."
         let that = this
-        spawn {
-            =>
-            let text = fn()
+        fn({
+            text =>
             launch({
                 =>
                 that.status = "done"
                 that.result = text
                 that.scroller.scrollTo(xOffset: 0, yOffset: 0)
             })
-        }
+        })
     }
 
     func build() {
@@ -796,37 +804,37 @@ class EntryView {
                     .maxLines(200)
                 Button("1. 协议协商 · HTTP/1.1")
                     .fontSize(14)
-                    .onClick({ evt => this.runScenario("run: protocol1", { => runProtocol1() }) })
+                    .onClick({ evt => this.runScenario("run: protocol1", { done => runProtocol1(done) }) })
                 Button("2. HTTP/2 · TLS/ALPN (8443)")
                     .fontSize(14)
-                    .onClick({ evt => this.runScenario("run: protocol2", { => runProtocol2() }) })
+                    .onClick({ evt => this.runScenario("run: protocol2", { done => runProtocol2(done) }) })
                 Button("3. REST 方法覆盖 (GET/POST/PUT/DELETE/HEAD/OPTIONS)")
                     .fontSize(14)
-                    .onClick({ evt => this.runScenario("run: methods", { => runMethods() }) })
+                    .onClick({ evt => this.runScenario("run: methods", { done => runMethods(done) }) })
                 Button("4. Header 正规化 (大小写, h1 vs h2)")
                     .fontSize(14)
-                    .onClick({ evt => this.runScenario("run: headers", { => runHeaders() }) })
+                    .onClick({ evt => this.runScenario("run: headers", { done => runHeaders(done) }) })
                 Button("5. Cookie 手动往返")
                     .fontSize(14)
-                    .onClick({ evt => this.runScenario("run: cookies", { => runCookies() }) })
+                    .onClick({ evt => this.runScenario("run: cookies", { done => runCookies(done) }) })
                 Button("6. Cache (max-age, 服务端计数)")
                     .fontSize(14)
-                    .onClick({ evt => this.runScenario("run: cache", { => runCache() }) })
+                    .onClick({ evt => this.runScenario("run: cache", { done => runCache(done) }) })
                 Button("7. Cache + ETag (条件请求 / 304)")
                     .fontSize(14)
-                    .onClick({ evt => this.runScenario("run: etag", { => runEtag() }) })
+                    .onClick({ evt => this.runScenario("run: etag", { done => runEtag(done) }) })
                 Button("8. Multipart/form-data 上传")
                     .fontSize(14)
-                    .onClick({ evt => this.runScenario("run: multipart", { => runMultipart() }) })
+                    .onClick({ evt => this.runScenario("run: multipart", { done => runMultipart(done) }) })
                 Button("9. 二进制上传 (octet-stream)")
                     .fontSize(14)
-                    .onClick({ evt => this.runScenario("run: binary", { => runBinary() }) })
+                    .onClick({ evt => this.runScenario("run: binary", { done => runBinary(done) }) })
                 Button("10. 网络安全配置: trust-anchors")
                     .fontSize(14)
-                    .onClick({ evt => this.runScenario("run: nscTrust", { => runNscTrust() }) })
+                    .onClick({ evt => this.runScenario("run: nscTrust", { done => runNscTrust(done) }) })
                 Button("11. 网络安全配置: 明文权限")
                     .fontSize(14)
-                    .onClick({ evt => this.runScenario("run: nscCleartext", { => runNscCleartext() }) })
+                    .onClick({ evt => this.runScenario("run: nscCleartext", { done => runNscCleartext(done) }) })
             }.width(100.percent)
         }.height(100.percent).scrollable(ScrollDirection.Vertical)
     }
