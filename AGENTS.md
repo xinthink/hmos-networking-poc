@@ -149,6 +149,14 @@ devecocli emulator list / start "Pura 90"
   无 `connectionExtraInfo`；只有 `caPath`（文件路径）无 `caData`；Network Kit 回调在
   后台线程、直接写 `@State` 会崩溃（需 `ResultBridge` 跨线程桥）；无 JSON 库。
   详见 `COMPARISON.md`「Cangjie 语言视角」章节。
+- **stdx.net.http（Cangjie 原生扩展库）对比组**：明文 HTTP 可用（同步 API、支持
+  PATCH、Set-Cookie 标准格式）；**HTTPS 不可用**（dlopen 系统 OpenSSL，模拟器无 →
+  TlsException）；Header 发送小写化、无缓存，与 Network Kit 一致。集成成本极高
+  （需交叉编译 + DevEco cangjie schema 扩展），详见 `COMPARISON.md`「stdx.net.http
+  实测对比」与 `cj-network-compare/AGENTS.md`。
+- ⚠️ **cj-network-compare 构建必须带 `DEVECO_CANGJIE_PATH`** 环境变量（指向 cangjie
+  SDK），否则 hvigor 的 cangjie schema 扩展不生效（build-profile 校验报
+  cangjieOptions 非法）。
 
 ## 端到端验证流程
 

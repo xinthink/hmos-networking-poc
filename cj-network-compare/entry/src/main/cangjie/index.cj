@@ -5,6 +5,17 @@ import kit.NetworkKit.*
 import std.core.*
 import std.collection.HashMap
 import std.collection.ArrayList
+import std.fs.File
+import std.fs.OpenMode
+// stdx.net.http（Cangjie 原生扩展库）：类名与 Network Kit 冲突，用别名导入
+import stdx.net.http.Client as StdxClient
+import stdx.net.http.ClientBuilder as StdxClientBuilder
+import stdx.net.http.HttpRequestBuilder as StdxRequestBuilder
+import stdx.net.http.HttpResponse as StdxResponse
+import stdx.net.tls.TlsClientConfig
+import stdx.net.tls.common.CertificateVerifyMode
+import stdx.crypto.x509.X509Certificate
+import stdx.crypto.common.Certificate
 import ohos.arkui.state_macro_manage.Entry
 import ohos.arkui.state_macro_manage.Component
 import ohos.arkui.state_macro_manage.State
@@ -759,6 +770,298 @@ func runNscCleartext(done: (String) -> Unit) {
     }, done)
 }
 
+// ============ stdx.net.http 对比组 ============
+// Cangjie 原生扩展库（stdx），同步阻塞 API。与 Network Kit 组镜像同一批场景。
+// 由 runStdx 放入 spawn 后台线程执行（同步阻塞不卡 UI），结果经 launch 回主线程。
+// 注意：stdx 是纯 Cangjie socket 实现，不经过 HarmonyOS Network Kit，
+// 因此 network_config.json 的 trust-anchors/明文管控对它无效（实测验证点）。
+
+// 读取 response body（InputStream）为 String
+func stdxReadBody(rsp: StdxResponse): String {
+    let buf = Array<Byte>(65536, repeat: UInt8(0))
+    let sb = StringBuilder()
+    var n = rsp.body.read(buf)
+    while (n > 0) {
+        sb.append(String.fromUtf8(buf.slice(0, n)))
+        n = rsp.body.read(buf)
+    }
+    return sb.toString()
+}
+
+// 读 resfile 里的 CA PEM（bundle 只读路径）
+func stdxReadCaPem(): String {
+    let f = File(CA_PATH, OpenMode.Read)
+    let bytes = Array<Byte>(f.length, repeat: UInt8(0))
+    f.read(bytes)
+    f.close()
+    return String.fromUtf8(bytes)
+}
+
+// https=true 时用 CustomCA（自签 CA PEM）+ ALPN h2；明文时普通 client
+func stdxNewClient(https: Bool): StdxClient {
+    if (!https) {
+        return StdxClientBuilder().build()
+    }
+    let certs = X509Certificate.decodeFromPem(stdxReadCaPem())
+    var tls = TlsClientConfig()
+    tls.verifyMode = CertificateVerifyMode.CustomCA(certs.map({ c => c }))
+    tls.supportedAlpnProtocols = ["h2"]
+    return StdxClientBuilder().tlsConfig(tls).build()
+}
+
+// 取某个响应头的全部值（Set-Cookie 等多值头），join 成多行
+func stdxHeaderValues(rsp: StdxResponse, name: String): String {
+    let sb = StringBuilder()
+    let values = rsp.headers.get(name)
+    for (v in values) {
+        sb.append("${v}\n")
+    }
+    return sb.toString()
+}
+
+// --- stdx 场景 1/2: 协议协商 ---
+func stdxProtocol1(): String {
+    let client = StdxClientBuilder().build()
+    try {
+        let rsp = client.get("${HTTP1_BASE}/api/protocol")
+        let body = stdxReadBody(rsp)
+        "HTTP ${rsp.status} | client version ${rsp.version}\nserver saw: ${jStr(body, "protocol")} (httpVersion ${jStr(body, "httpVersion")})"
+    } catch (e: Exception) {
+        "ERROR ${e}"
+    } finally {
+        client.close()
+    }
+}
+
+func stdxProtocol2(): String {
+    let client = stdxNewClient(true)
+    try {
+        let rsp = client.get("${HTTPS_BASE}/api/protocol")
+        let body = stdxReadBody(rsp)
+        "HTTP ${rsp.status} | client version ${rsp.version}\nserver saw: ${jStr(body, "protocol")} (httpVersion ${jStr(body, "httpVersion")})"
+    } catch (e: Exception) {
+        "ERROR ${e}"
+    } finally {
+        client.close()
+    }
+}
+
+// --- stdx 场景 3: REST 方法覆盖（stdx 支持任意 method 字符串，含 PATCH）---
+func stdxMethods(): String {
+    let client = StdxClientBuilder().build()
+    let sb = StringBuilder()
+    try {
+        let methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
+        for (m in methods) {
+            let req = StdxRequestBuilder().method(m).url("${HTTP1_BASE}/api/methods").build()
+            let rsp = client.send(req)
+            let body = stdxReadBody(rsp)
+            if (body.isEmpty()) {
+                sb.append("${m.padEnd(8)} -> ${rsp.status}  server echoed: (no body)\n")
+            } else {
+                sb.append("${m.padEnd(8)} -> ${rsp.status}  server echoed: ${jStr(body, "method")}\n")
+            }
+        }
+    } catch (e: Exception) {
+        sb.append("ERROR ${e}\n")
+    } finally {
+        client.close()
+    }
+    return sb.toString()
+}
+
+// --- stdx 场景 4: Header 正规化（大小写） ---
+func stdxHeadersTarget(label: String, base: String): String {
+    let client = stdxNewClient(base.startsWith("https"))
+    try {
+        let req = StdxRequestBuilder()
+            .method("GET")
+            .url("${base}/api/headers")
+            .header("Accept", "application/json")
+            .header("X-MiXeD-CaSe-Hdr", "MixedCaseValue")
+            .header("x-lowercase-hdr", "lower")
+            .header("X-ALLCAPS-HDR", "upper")
+            .build()
+        let rsp = client.send(req)
+        let body = stdxReadBody(rsp)
+        let entries = jObjEntries(body, "wireHeaders")
+        let sb2 = StringBuilder()
+        for (kv in entries) {
+            let k = kv.k.toAsciiLower()
+            if (k.startsWith("x-")) {
+                sb2.append("    ${kv.k} = ${kv.v}\n")
+            }
+        }
+        "[${label}] server received header names:\n${sb2.toString()}"
+    } catch (e: Exception) {
+        "ERROR ${e}"
+    } finally {
+        client.close()
+    }
+}
+
+func stdxHeaders(): String {
+    return stdxHeadersTarget("HTTP/1.1", HTTP1_BASE) + stdxHeadersTarget("HTTP/2", HTTPS_BASE)
+}
+
+// --- stdx 场景 5: Cookie 手动往返（与 Network Kit 同法：解析 Set-Cookie 回填）---
+func stdxCookies(): String {
+    let client = StdxClientBuilder().build()
+    try {
+        let setRsp = client.get("${HTTP1_BASE}/api/cookie/set")
+        let rawCookies = stdxHeaderValues(setRsp, "set-cookie")
+        let cookieHeader = extractCookieHeader(rawCookies)
+        let req = StdxRequestBuilder()
+            .method("GET")
+            .url("${HTTP1_BASE}/api/cookie/read")
+            .header("Cookie", cookieHeader)
+            .build()
+        let readRsp = client.send(req)
+        let body = stdxReadBody(readRsp)
+        "Set-Cookie(raw): ${rawCookies}server saw Cookie: ${jStr(body, "cookieHeader")}"
+    } catch (e: Exception) {
+        "ERROR ${e}"
+    } finally {
+        client.close()
+    }
+}
+
+// --- stdx 场景 6/7: Cache / Cache+ETag（stdx 无 HTTP 缓存，预期 delta=2 全走网络）---
+func stdxCacheStats(client: StdxClient): Int64 {
+    let rsp = client.get("${HTTP1_BASE}/api/cache/stats")
+    return jInt(stdxReadBody(rsp), "networkHits")
+}
+
+func stdxCache(): String {
+    let client = StdxClientBuilder().build()
+    try {
+        let before = stdxCacheStats(client)
+        let sb = StringBuilder()
+        for (i in 1..=2) {
+            let rsp = client.get("${HTTP1_BASE}/api/cache")
+            sb.append("req #${i}: status=${rsp.status}\n")
+        }
+        let after = stdxCacheStats(client)
+        let delta = after - before
+        sb.append("server network hits: before=${before} after=${after} delta=${delta}\n")
+        sb.append("(stdx 无 HTTP 缓存，两次都走网络)")
+        sb.toString()
+    } catch (e: Exception) {
+        "ERROR ${e}"
+    } finally {
+        client.close()
+    }
+}
+
+func stdxEtagStats(client: StdxClient): EtagStats {
+    let rsp = client.get("${HTTP1_BASE}/api/cache/etag/stats")
+    let body = stdxReadBody(rsp)
+    return EtagStats(jInt(body, "full200"), jInt(body, "notModified304"), jInt(body, "ifNoneMatchSeen"))
+}
+
+func stdxEtag(): String {
+    let client = StdxClientBuilder().build()
+    try {
+        let before = stdxEtagStats(client)
+        let sb = StringBuilder()
+        for (i in 1..=2) {
+            let rsp = client.get("${HTTP1_BASE}/api/cache/etag")
+            sb.append("req #${i}: status=${rsp.status}\n")
+        }
+        let after = stdxEtagStats(client)
+        let dInm = after.ifNoneMatchSeen - before.ifNoneMatchSeen
+        let d304 = after.notModified304 - before.notModified304
+        sb.append("server stats before: 200=${before.full200} 304=${before.notModified304} inm=${before.ifNoneMatchSeen}\n")
+        sb.append("server stats after : 200=${after.full200} 304=${after.notModified304} inm=${after.ifNoneMatchSeen}\n")
+        sb.append("delta: ifNoneMatchSeen=${dInm} notModified304=${d304}\n")
+        if (dInm > 0 && d304 > 0) {
+            sb.append("=> ETag 条件请求生效（客户端发了 If-None-Match，服务端回 304）")
+        } else {
+            sb.append("=> ETag 未生效（未发送 If-None-Match）")
+        }
+        sb.toString()
+    } catch (e: Exception) {
+        "ERROR ${e}"
+    } finally {
+        client.close()
+    }
+}
+
+// --- stdx 场景 8: Multipart（手工拼 multipart body）---
+func stdxMultipart(): String {
+    let client = StdxClientBuilder().build()
+    try {
+        let boundary = "----cangjieStdX"
+        // 二进制 part 用可见 ASCII（32-126），避免 \r\n 与 boundary 冲突
+        let bin = Array<Byte>(256) { i => UInt8(32 + i % 95) }
+        var body = "--${boundary}\r\nContent-Disposition: form-data; name=\"field1\"\r\n\r\nhello-from-stdx\r\n"
+        body = "${body}--${boundary}\r\nContent-Disposition: form-data; name=\"file1\"; filename=\"stdx.bin\"\r\nContent-Type: application/octet-stream\r\n\r\n"
+        body = "${body}${String.fromUtf8(bin)}\r\n--${boundary}--\r\n"
+        let req = StdxRequestBuilder()
+            .method("POST")
+            .url("${HTTP1_BASE}/api/upload/multipart")
+            .header("Content-Type", "multipart/form-data; boundary=${boundary}")
+            .body(body)
+            .build()
+        let rsp = client.send(req)
+        let s = stdxReadBody(rsp)
+        "HTTP ${rsp.status} | partCount=${jInt(s, "partCount")} totalBytes=${jInt(s, "totalBytes")} boundary=${jStr(s, "boundary")}"
+    } catch (e: Exception) {
+        "ERROR ${e}"
+    } finally {
+        client.close()
+    }
+}
+
+// --- stdx 场景 9: 二进制上传（body(Array<UInt8>) 原生支持）---
+func stdxBinary(): String {
+    let client = StdxClientBuilder().build()
+    try {
+        let payload = Array<Byte>(4096) { i => UInt8((i * 31) % 128) }
+        let req = StdxRequestBuilder()
+            .method("POST")
+            .url("${HTTP1_BASE}/api/upload/binary")
+            .header("Content-Type", "application/octet-stream")
+            .body(payload)
+            .build()
+        let rsp = client.send(req)
+        let s = stdxReadBody(rsp)
+        "HTTP ${rsp.status} | bytes=${jInt(s, "bytes")} sha256=${jStr(s, "sha256")}\nserver saw content-type: ${jStr(s, "contentType")}"
+    } catch (e: Exception) {
+        "ERROR ${e}"
+    } finally {
+        client.close()
+    }
+}
+
+// --- stdx 场景 10: HTTPS 信任（CustomCA 代码级；对照 Network Kit 的 trust-anchors）---
+func stdxNscTrust(): String {
+    let client = stdxNewClient(true)
+    try {
+        let rsp = client.get("${HTTPS_BASE}/api/protocol")
+        let body = stdxReadBody(rsp)
+        "HTTP ${rsp.status} | client version ${rsp.version}\nserver saw: ${jStr(body, "protocol")}\nnote: 用 CustomCA（代码级），不走 network_config.json trust-anchors"
+    } catch (e: Exception) {
+        "ERROR ${e}"
+    } finally {
+        client.close()
+    }
+}
+
+// --- stdx 场景 11: 明文权限（stdx 原生 socket，预期不受 component-config 管控）---
+func stdxNscCleartext(): String {
+    let client = StdxClientBuilder().build()
+    try {
+        let rsp = client.get("${HTTP1_BASE}/api/protocol")
+        let body = stdxReadBody(rsp)
+        "HTTP ${rsp.status} | server saw: ${jStr(body, "protocol")}\nnote: stdx 原生 socket 实现，不经过 Network Kit，明文管控对它无效（预期）"
+    } catch (e: Exception) {
+        "ERROR ${e}"
+    } finally {
+        client.close()
+    }
+}
+
 // ============ UI ============
 @Entry
 @Component
@@ -787,6 +1090,24 @@ class EntryView {
         })
     }
 
+    // stdx.net.http 是同步阻塞 API，必须放入 spawn 线程执行（UI 不阻塞），
+    // 结果经 launch 调度回主线程后更新 @State
+    func runStdx(label: String, fn: () -> String) {
+        this.status = label
+        this.result = "running..."
+        let that = this
+        spawn {
+            =>
+            let text = fn()
+            launch({
+                =>
+                that.status = "done"
+                that.result = text
+                that.scroller.scrollTo(xOffset: 0, yOffset: 0)
+            })
+        }
+    }
+
     func build() {
         Scroll(this.scroller) {
             Column {
@@ -802,6 +1123,43 @@ class EntryView {
                     .fontSize(12)
                     .width(95.percent)
                     .maxLines(200)
+                Text("— stdx.net.http 对比组（Cangjie 原生扩展库，同步 API）—")
+                    .fontSize(13)
+                    .fontWeight(FontWeight.Bold)
+                    .margin(top: 12, bottom: 4)
+                Button("S1. 协议协商 · HTTP/1.1 (stdx)")
+                    .fontSize(14)
+                    .onClick({ evt => this.runStdx("run: stdxProtocol1", { => stdxProtocol1() }) })
+                Button("S2. HTTP/2 · TLS/ALPN (stdx)")
+                    .fontSize(14)
+                    .onClick({ evt => this.runStdx("run: stdxProtocol2", { => stdxProtocol2() }) })
+                Button("S3. REST 方法覆盖 (含 PATCH, stdx)")
+                    .fontSize(14)
+                    .onClick({ evt => this.runStdx("run: stdxMethods", { => stdxMethods() }) })
+                Button("S4. Header 正规化 (大小写, stdx)")
+                    .fontSize(14)
+                    .onClick({ evt => this.runStdx("run: stdxHeaders", { => stdxHeaders() }) })
+                Button("S5. Cookie 手动往返 (stdx)")
+                    .fontSize(14)
+                    .onClick({ evt => this.runStdx("run: stdxCookies", { => stdxCookies() }) })
+                Button("S6. Cache (max-age, stdx)")
+                    .fontSize(14)
+                    .onClick({ evt => this.runStdx("run: stdxCache", { => stdxCache() }) })
+                Button("S7. Cache + ETag (stdx)")
+                    .fontSize(14)
+                    .onClick({ evt => this.runStdx("run: stdxEtag", { => stdxEtag() }) })
+                Button("S8. Multipart/form-data 上传 (stdx)")
+                    .fontSize(14)
+                    .onClick({ evt => this.runStdx("run: stdxMultipart", { => stdxMultipart() }) })
+                Button("S9. 二进制上传 (octet-stream, stdx)")
+                    .fontSize(14)
+                    .onClick({ evt => this.runStdx("run: stdxBinary", { => stdxBinary() }) })
+                Button("S10. HTTPS 信任 CustomCA (stdx)")
+                    .fontSize(14)
+                    .onClick({ evt => this.runStdx("run: stdxNscTrust", { => stdxNscTrust() }) })
+                Button("S11. 明文权限 (stdx, 预期不受管控)")
+                    .fontSize(14)
+                    .onClick({ evt => this.runStdx("run: stdxNscCleartext", { => stdxNscCleartext() }) })
                 Button("1. 协议协商 · HTTP/1.1")
                     .fontSize(14)
                     .onClick({ evt => this.runScenario("run: protocol1", { done => runProtocol1(done) }) })

@@ -29,3 +29,6 @@ network-compare/oh-package-lock.json5
 
 # OS
 .DS_Store
+
+# cj-network-compare: stdx .so 运行时库（从 cangjie_stdx target 复制，构建产物）
+cj-network-compare/entry/libs/

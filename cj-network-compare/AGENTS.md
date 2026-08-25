@@ -13,7 +13,7 @@ API 24），用于验证 **Cangjie 语言下 Network Kit 的 HTTP 能力**。改
 
 ```
 cangjie/
-├── index.cj                    # 全部 11 个场景 + UI（EntryView）
+├── index.cj                    # 全部 11 个 Network Kit 场景 + 11 个 stdx 场景 + UI（EntryView）
 ├── main_ability.cj             # MainAbility（loadContent("EntryView")）
 └── ability_*.cj / module_entry_entry.cj   # 模板生成的 ability/stage 文件
 resources/
@@ -21,13 +21,46 @@ resources/
 └── resfile/mock-ca/            # 自签 CA：cert.pem + <hash>.0（caPath 指向这里）
 ```
 
+工程根：
+```
+hvigor/cangjie-build-support-6.1.280.tgz   # DevEco cangjie schema 扩展（从 DevEco 插件提取，构建必需）
+entry/libs/arm64-v8a/*.so                  # stdx 运行时库（gitignored，从 stdx target 复制）
+```
+
+## stdx.net.http 集成（对比组 S1–S11）
+
+stdx（Cangjie 扩展标准库）的 OHOS 集成是本工程最重的部分，**只在需要对比 stdx 时**维护：
+
+1. **stdx 源码**：`/Users/ywu/ws/sdk/CangjieSDKs/cangjie_stdx`（v0.60.5.1，本地 patch 过
+   RPATH/静态初始化问题）。构建 for OHOS aarch64：
+   ```bash
+   export PATH=$CANGJIE_SDK/build-tools/bin:$PATH
+   export CANGJIE_HOME=/tmp/cjohos   # 构造的 SDK 根（modules/runtime/lib/third_party 符号链接到 6.1 SDK）
+   python3 build.py build -t release --target ohos-aarch64 \
+     --target-toolchain <DevEco native llvm/bin> --target-sysroot <DevEco native sysroot> \
+     --include /opt/homebrew/opt/openssl@3/include --target-lib /opt/homebrew/opt/openssl@3/lib
+   python3 build.py install   # 产物：target/linux_ohos_aarch64_cjnative/{static,dynamic}/stdx
+   ```
+2. **cjpm.toml**：`[target.aarch64-linux-ohos.bin-dependencies]` 的 `path-option` 追加
+   stdx 产物目录（`.../linux_ohos_aarch64_cjnative/dynamic/stdx`，**该目录需含
+   `package.json`**，从 `.../linux_ohos_aarch64_cjnative/package.json` 复制）。
+3. **运行时 .so**：把 `dynamic/stdx/*.so` 复制到 `entry/libs/arm64-v8a/`（gitignored，
+   打包进 hap 供运行时加载）。
+4. **cangjie schema 扩展**（DevEco 6.1 bug 修复）：hvigor-config.json5 声明
+   `"@ohos/cangjie-build-support": "file:cangjie-build-support-6.1.280.tgz"`（从 DevEco
+   插件 `~/Library/Application Support/Huawei/DevEcoStudio6.1/plugins/devecostudio-cangjie-plugin-mac-arm-6.1.1.280/lib/hvigor/cangjie-build-support`
+   打包，去掉 postinstall）。**devecocli build 必须带 `DEVECO_CANGJIE_PATH=$CANGJIE_SDK`**
+   （否则 cangjie 插件走 deleteSchema 分支，build-profile 校验报 cangjieOptions 非法）。
+
 ## 常用命令（在 cj-network-compare/ 下执行）
 
 ```bash
-devecocli build                                  # 编译（cjc 1.1.3）
-devecocli run --device "Pura 90" --skip-build --uninstall   # 重装启动
-devecocli run --device "Pura 90"                 # 构建+安装+启动
+DEVECO_CANGJIE_PATH=/Users/ywu/.cangjie-sdk/6.1/cangjie devecocli build     # 编译（cjc 1.1.3）
+DEVECO_CANGJIE_PATH=/Users/ywu/.cangjie-sdk/6.1/cangjie devecocli run --device "Pura 90" --skip-build --uninstall   # 重装启动
 ```
+
+> ⚠️ **构建必须带 `DEVECO_CANGJIE_PATH`**（指向含 oh-uni-package.json 的 cangjie SDK），
+> 否则 hvigor 的 cangjie schema 扩展不生效。
 
 > `devecocli build/run` 需写 `~/.hvigor`、`~/.ohpm`，必须在本机非沙箱环境执行。
 

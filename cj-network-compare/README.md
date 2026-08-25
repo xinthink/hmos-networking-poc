@@ -2,7 +2,8 @@
 
 纯 **Cangjie**（仓颉）HarmonyOS App，把 `network-compare/` 的 11 个 HTTP 对比场景用
 Cangjie 语言 + Network Kit（`import kit.NetworkKit.*`）全部实现一遍，验证 Cangjie 生态
-下的网络能力，并与 ArkTS 版 Network Kit 的行为对齐。
+下的网络能力，并与 ArkTS 版 Network Kit 的行为对齐。**另含一组 stdx.net.http
+（Cangjie 原生扩展库）对比（S1–S11）**。
 
 > 本工程**没有 RCP / Axios**：Remote Communication Kit **没有 Cangjie 绑定**
 > （`kit.RemoteCommunicationKit` 不存在），Axios 是 ArkTS/JS 库。Cangjie 侧网络框架
@@ -14,10 +15,10 @@ Cangjie 语言 + Network Kit（`import kit.NetworkKit.*`）全部实现一遍，
 # 1. 启动 mock server（必须先于 App）
 cd ../mock-server && npm start        # :8080 (HTTP/1.1) + :8443 (HTTPS/HTTP2)
 
-# 2. 构建 + 部署到模拟器
+# 2. 构建 + 部署到模拟器（⚠️ 必须带 DEVECO_CANGJIE_PATH，见 AGENTS.md）
 cd ../cj-network-compare
-devecocli build
-devecocli run --device "Pura 90" --skip-build --uninstall
+DEVECO_CANGJIE_PATH=/Users/ywu/.cangjie-sdk/6.1/cangjie devecocli build
+DEVECO_CANGJIE_PATH=/Users/ywu/.cangjie-sdk/6.1/cangjie devecocli run --device "Pura 90" --skip-build --uninstall
 ```
 
 模拟器访问宿主机用 `10.0.2.2`（App 内已固定；真机需改为开发机局域网 IP）。
@@ -37,6 +38,21 @@ devecocli run --device "Pura 90" --skip-build --uninstall
 | 9 | 二进制上传 | ✅ 4096 bytes，服务端 sha256 与客户端 payload 完全一致 |
 | 10 | trust-anchors | ✅ 无 `caPath` 时 HTTPS 成功（network_config.json 应用级信任锚点生效） |
 | 11 | 明文控制 | ✅ `component-config."Network Kit"` 生效（明文 HTTP 200） |
+
+## stdx.net.http 对比组（S1–S11，Cangjie 原生扩展库）
+
+与 Network Kit 组镜像同一批场景，但用 **stdx.net.http**（`cangjie_stdx` 源码本地构建
+for OHOS）。实测要点：
+
+- **明文 HTTP 全部可用**（同步 API：`ClientBuilder().build()` + `client.get()`）。
+- **HTTPS 不可用**：stdx TLS 靠 dlopen 系统 OpenSSL（`libssl_openssl.z.so`），模拟器
+  系统无 → `TlsException`。HTTPS 场景（S2/S10、S4 的 h2 段）失败。
+- **支持 PATCH**（任意 method 字符串）——Network Kit 无 Patch。
+- **Set-Cookie 是标准 `name=value;` 格式**——Network Kit 是 Netscape cookie-file 格式。
+- Header 发送小写化、无 HTTP 缓存（delta=2），与 Network Kit 一致。
+- 详细结论见根目录 `COMPARISON.md`「stdx.net.http 实测对比」。
+
+stdx 的 OHOS 集成（交叉编译、schema 扩展、.so 打包）很重，步骤见本工程 `AGENTS.md`。
 
 ## 关键配置
 
@@ -61,6 +77,7 @@ devecocli run --device "Pura 90" --skip-build --uninstall
 - **无 JSON 库**：标准库/kit 无 JSON 解析声明，`index.cj` 手写极简提取器
   （`jStr`/`jInt`/`jObjEntries`/`jArrElemStr`），仅适用于 mock server 的扁平响应。
 - **`Byte` 即 `UInt8`**：数值转换一律用类型构造函数（`UInt8(x)`），无 `.toUInt8()`。
+- **构建必须带 `DEVECO_CANGJIE_PATH`**（见 AGENTS.md）。
 - 更多约束见本工程 `AGENTS.md` 踩坑清单。
 
 ## 验证

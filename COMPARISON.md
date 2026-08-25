@@ -236,6 +236,49 @@ Axios 实测全部 11 个场景通过（`AxiosScenarios.ets`），以下是它�
 6. **`Byte` 即 `UInt8`**：`public type Byte = UInt8`；整数转字节用类型构造函数
    `UInt8(x)`（Cangjie 无 `.toUInt8()` 方法，数值转换一律用类型构造语法）。
 
+## stdx.net.http（Cangjie 原生扩展库）实测对比
+
+> 在 `cj-network-compare` 中新增了 **stdx.net.http** 对比组（S1–S11 按钮）：Cangjie
+> 官方扩展标准库（`cangjie_stdx`，v0.60.5.1 源码本地构建 for OHOS aarch64），纯 Cangjie
+> socket 实现 + OpenSSL dlopen。与 Network Kit 组镜像同一批场景，实测结论如下。
+
+| 场景 | stdx.net.http 实测 | 与 Network Kit 对比 |
+|------|---------------------|---------------------|
+| 协议协商 HTTP/1.1 | ✅ HTTP 200，`rsp.version` 直接可读（HTTP/1.1） | 均可 |
+| HTTP/2 (TLS/ALPN) | ❌ **TlsException: Can not load openssl library** | Network Kit ✅（HTTPS 可用） |
+| REST 方法 | ✅ 7 个方法全 200，**含 PATCH**（任意 method 字符串） | stdx ✅ PATCH；Network Kit ❌ 无 Patch |
+| Header 大小写 h1 | ⚠️ 发送即小写（server 收到 `x-mixed-case-hdr`） | 与 Network Kit 一致（RCP 保留） |
+| Cookie | ✅ 手动；`Set-Cookie` 是**标准 `name=value;` 格式** | stdx 标准格式；Network Kit 是 **Netscape cookie-file 格式** |
+| Cache (max-age) | ⚠️ 无 HTTP 缓存（delta=2） | 与 Network Kit 一致（未命中） |
+| Cache + ETag | ❌ 未发送 If-None-Match | 与 Network Kit 一致 |
+| Multipart | ✅ 手工拼 body，partCount=2 | 均可（stdx 需手工构造） |
+| 二进制上传 | ✅ 4096 bytes，sha256 与客户端 payload 一致 | 均可 |
+| HTTPS 信任 | ❌ 同上 TlsException（CustomCA 需 OpenSSL） | Network Kit ✅（trust-anchors/caPath） |
+| 明文权限 | ✅ 明文 HTTP 可用 | stdx 原生 socket，**不经过** network_config.json 管控（架构结论） |
+
+**stdx.net.http 在 OHOS 上的关键结论**：
+
+1. **明文 HTTP 完全可用**：HTTP/1.1 客户端（`ClientBuilder().build()` + `client.get()`）在
+   模拟器实测全部通过。**同步阻塞 API**（`send(req): HttpResponse`），比 Network Kit 的
+   异步回调简单，但会阻塞调用线程（`index.cj` 用 `runStdx` 放到 spawn 线程执行）。
+2. **HTTPS 不可用（硬限制）**：stdx 的 TLS 通过 **dlopen 系统 OpenSSL**（OHOS 上
+   `libssl_openssl.z.so`）加载符号，而**模拟器系统没有该库** → 所有 HTTPS 场景报
+   `TlsException: Can not load openssl library or function CRYPTO_get_ex_new_index`。
+   真机若有 OpenSSL 系统库可能可用，但 NDK 无 OpenSSL 头文件/库，stdx 的编译也依赖
+   OpenSSL 头文件（`opensslSymbols.h`），集成成本高。**结论：stdx.net.http 适合明文
+   场景，HTTPS 场景仍必须用 Network Kit**。
+3. **API 形态**：`HttpRequestBuilder().method("PATCH")` 支持任意方法（**PATCH 可用**，
+   对比 Network Kit 无 Patch/customMethod）；`HttpResponse.version` 直接读协议版本
+   （对比 Network Kit 无 connectionExtraInfo）；`HttpHeaders` 多值访问。
+4. **Cookie 格式不同**：stdx 的 `Set-Cookie` 响应头是标准 `name=value; Path=/; HttpOnly`
+   格式；Network Kit 的 `response.cookies` 是 Netscape cookie-file 格式（tab 分隔）。
+   两者都需手动解析回填（stdx 无自动 cookie jar 接入）。
+5. **Header 发送小写化**：stdx 发送 header 名转小写（server 实测 `x-mixed-case-hdr`），
+   与 Network Kit 一致（RCP 保留原大小写）。
+6. **构建成本极高**：stdx for OHOS 需本地交叉编译（OpenSSL 头文件 + cjc 1.1.3 兼容
+   patch），且 DevEco 6.1 的 cangjie schema 扩展依赖 `@ohos/cangjie-build-support`
+   （从 DevEco 插件提取 6.1.280 版）。**不建议常规工程引入**；本仓库集成仅为对比验证。
+
 ## 可行性结论（模拟器实测后更新）
 
 - **可平滑替换**：REST 方法、HTTP/1.1/2 协议、Multipart、二进制上传等核心 HTTP
