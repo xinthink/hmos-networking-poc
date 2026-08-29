@@ -53,6 +53,13 @@ stdx（Cangjie 扩展标准库）以 **git submodule** 管理（`vendor/cangjie_
 > 缓存与 node 版本不匹配会**构建卡死**（无输出超时）。解决：删 `~/.hvigor/daemon`、
 > `~/.hvigor/project_caches` 后重建。
 
+> **cjpm 源码依赖替代方案（已验证，受 cjpm 1.1.3 限制）**：`[dependencies] stdx = {
+> path/git, output-type = "dynamic" }` 可触发 stdx 的 build.cj pre-build 自动交叉编译
+> native（OpenSSL 头需 patch PrepareOpenSSL 或官方 sysroot 方案），但组合时卡
+> `profile.build.combined` 实验性限制（拒绝非 root 包名）。当前落地仍用官方
+> **bin-dependencies**。token 配置在 `~/.cjpm/cangjie-repo.toml`（`[repository.home]` +
+> registry + token）；详见 `COMPARISON.md`「cjpm 源码依赖实测」。
+
 ## 常用命令（在 cj-network-compare/ 下执行）
 
 ```bash

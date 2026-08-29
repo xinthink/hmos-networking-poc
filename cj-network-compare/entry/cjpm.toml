@@ -28,7 +28,7 @@
 [target.x86_64-linux-ohos]
   compile-option = "-B \"${DEVECO_CANGJIE_HOME}/build-tools/third_party/llvm/bin\" -B \"${DEVECO_OH_NATIVE_HOME}/sysroot/usr/lib/x86_64-linux-ohos\" -L \"${DEVECO_OH_NATIVE_HOME}/sysroot/usr/lib/x86_64-linux-ohos\" -L \"${DEVECO_OH_NATIVE_HOME}/llvm/lib/clang/15.0.4/lib/x86_64-linux-ohos\" -L \"${DEVECO_OH_NATIVE_HOME}/llvm/lib/x86_64-linux-ohos\" --sysroot \"${DEVECO_OH_NATIVE_HOME}/sysroot\""
 [target.x86_64-linux-ohos.bin-dependencies]
-  path-option = ["${X86_64_OHOS_LIBS}", "${X86_64_OHOS_MACRO_LIBS}", "${X86_64_OHOS_KIT_LIBS}"]
+  path-option = ["${AARCH64_LIBS}", "${AARCH64_MACRO_LIBS}", "${AARCH64_KIT_LIBS}"]
 
 [target.aarch64-apple-darwin]
   compile-option = "--link-options=\"-rpath @executable_path/../../../sdk/cangjie/build-tools/runtime/lib/darwin_aarch64_cjnative\" --link-options=\"-rpath @executable_path/../../../sdk/cangjie/api/lib/darwin_aarch64_cjnative/kit\" --link-options=\"-rpath @executable_path/../../../sdk/cangjie/api/lib/darwin_aarch64_cjnative/ohos\" --link-options=\"-rpath @executable_path/../../../sdk/cangjie/api/macro/ohos\" --link-options=\"-rpath @executable_path/module/cj_sdk_libraries\""

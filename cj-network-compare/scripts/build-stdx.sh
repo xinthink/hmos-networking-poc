@@ -36,6 +36,22 @@ OPENSSL_LIB="$(dirname "$OPENSSL_INCLUDE")/lib"
 [ -d "$DEVECO_OH_NATIVE_HOME/llvm/bin" ] || { echo "ERROR: DevEco OH native SDK not found at $DEVECO_OH_NATIVE_HOME"; exit 1; }
 [ -d "$STDX_DIR" ] || { echo "ERROR: stdx submodule missing. Run: git submodule update --init --recursive"; exit 1; }
 
+# --- 构建工具探测（ninja/cmake 可能在 DevEco build-tools 下；mise/nodenv 切换 PATH 后易丢）---
+if ! command -v ninja >/dev/null 2>&1; then
+  for p in "$DEVECO_OH_NATIVE_HOME/build-tools/cmake/bin" /opt/homebrew/bin /usr/local/bin; do
+    if [ -x "$p/ninja" ]; then PATH="$p:$PATH"; break; fi
+  done
+fi
+if ! command -v cmake >/dev/null 2>&1; then
+  for p in "$DEVECO_OH_NATIVE_HOME/build-tools/cmake/bin" /opt/homebrew/bin /usr/local/bin /Applications/CMake.app/Contents/bin; do
+    if [ -x "$p/cmake" ]; then PATH="$p:$PATH"; break; fi
+  done
+fi
+command -v ninja >/dev/null 2>&1 || { echo "ERROR: ninja not found. Install ninja or add its bin to PATH"; exit 1; }
+command -v cmake >/dev/null 2>&1 || { echo "ERROR: cmake not found (need >= 3.16.5). Install cmake or add its bin to PATH"; exit 1; }
+command -v python3 >/dev/null 2>&1 || { echo "ERROR: python3 not found"; exit 1; }
+echo "==> tools: ninja=$(command -v ninja) cmake=$(command -v cmake) python=$(command -v python3)"
+
 # --- 构造 CANGJIE_HOME（cjc 1.1.3 期望 <root>/modules|runtime|lib|third_party 布局，
 #     而 6.1 SDK 的库分散在 build-tools/ 下）---
 CJOHOS_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/cjohos.XXXXXX")"

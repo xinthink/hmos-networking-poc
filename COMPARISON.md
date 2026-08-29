@@ -305,9 +305,36 @@ repo 分支/tag）"的调研结论（2026-08）：
 4. **落地方式（本仓库采用）**：**git submodule** 管理 stdx 源码
    （`cj-network-compare/vendor/cangjie_stdx`，pin 到 **v1.1.3.1** tag，免 patch 编译）+
    `cj-network-compare/scripts/build-stdx.sh` 自动化交叉编译（自动构造 CANGJIE_HOME、
-   探测 OpenSSL 头文件、复制 .so 到 entry/libs）。其他机器 `git clone --recursive` 后
-   跑脚本即可复现，**不依赖本机 stdx 路径**；`cjpm.toml` 用相对路径
-   `../vendor/cangjie_stdx/target/linux_ohos_aarch64_cjnative/dynamic/stdx`。
+   探测 OpenSSL 头文件/ninja/cmake、复制 .so 到 entry/libs）。其他机器
+   `git clone --recursive` 后跑脚本即可复现，**不依赖本机 stdx 路径**；`cjpm.toml`
+   用相对路径 `../vendor/cangjie_stdx/target/linux_ohos_aarch64_cjnative/dynamic/stdx`
+   （cjpm bin-dependencies 二进制依赖，官方推荐方式）。
+
+### cjpm 源码依赖实测（token 配置后验证，2026-08）
+
+配置 `~/.cjpm/cangjie-repo.toml`（`[repository.home]` + `registry` + `token`，token 已
+配置）后，实测 **cjpm 管理 stdx 的源码依赖链路**：
+
+1. **解析与自动构建（部分成功）**：`[dependencies] stdx = { path/git, output-type =
+   "dynamic" }`（stdx v1.1.3.1 根含 cjpm.toml）→ cjpm 触发 stdx 的 **build script
+   （build.cj）pre-build**，自动交叉编译 native（OpenSSL FFI 等）到
+   `/tmp/stdx/target/`——**native 自动构建成功**（手动 build.py 不必需）。
+2. **OpenSSL 头**：官方要求 `OPENSSL_ROOT_DIR` 环境变量或把 openssl 头放进 DevEco
+   sysroot（`.../sysroot/usr/include/openssl`）；本机 DevEco 目录受保护无法放头，
+   需临时 patch `PrepareOpenSSL.cmake` 的 OHOS 分支设 `OPENSSL_INCLUDE_DIR`（submodule
+   本地）。
+3. **combined 限制（cjpm 1.1.3 实验性功能）**：stdx 作为源码依赖组合时报
+   `field 'profile.build.combined' must be configured to combine module 'stdx'`，
+   而 combined 校验又拒绝非 root 包名（`can only used for root package`）——**cjpm
+   1.1.3 的已知限制**（combined 标注 unstable，新版 cjpm 校验逻辑已不同）。**源码
+   依赖 + 组合在 cjpm 1.1.3 上走不通**。
+4. **结论**：**通过 cjpm 管理 stdx 当前用官方 bin-dependencies（二进制依赖）方式**
+   （本仓库落地）；**源码依赖（git/path + build script 自动构建）机制已跑通到
+   native 构建，被 cjpm 1.1.3 的 combined 实验性限制挡住**，等 cjpm 更新或 stdx 发布
+   registry 包（`pkg.cangjie-lang.cn` 需 token，stdx 尚未发布）后可直接切换。
+5. ⚠️ **工具链 PATH**：mise/nodenv 切换 node 后 PATH 会丢 ninja/cmake
+   （DevEco 的 `.../native/build-tools/cmake/bin`），`build-stdx.sh` 已自动探测；
+   hvigor 卡死需清 `~/.hvigor/daemon` + `project_caches`（见 cj-network-compare/AGENTS.md）。
 
 ## 可行性结论（模拟器实测后更新）
 
