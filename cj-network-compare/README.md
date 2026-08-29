@@ -52,7 +52,17 @@ for OHOS）。实测要点：
 - Header 发送小写化、无 HTTP 缓存（delta=2），与 Network Kit 一致。
 - 详细结论见根目录 `COMPARISON.md`「stdx.net.http 实测对比」。
 
-stdx 的 OHOS 集成（交叉编译、schema 扩展、.so 打包）很重，步骤见本工程 `AGENTS.md`。
+stdx 以 **git submodule** 管理（`vendor/cangjie_stdx`，pin 官方 v1.1.3.1 tag）。其他机器：
+
+```bash
+git clone --recursive <repo>          # 拉取含 submodule 的仓库
+cd cj-network-compare
+./scripts/build-stdx.sh               # 交叉编译 stdx + 复制 .so（需 cangjie SDK / DevEco native / OpenSSL 头）
+DEVECO_CANGJIE_PATH=<cangjie-sdk> devecocli build
+```
+
+stdx 的 OHOS 集成（交叉编译、DevEco cangjie schema 扩展、.so 打包）很重，步骤与踩坑
+（含 hvigor 卡死排查）见本工程 `AGENTS.md`。
 
 ## 关键配置
 

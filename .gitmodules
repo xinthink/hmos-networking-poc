@@ -1,0 +1,3 @@
+[submodule "cj-network-compare/vendor/cangjie_stdx"]
+	path = cj-network-compare/vendor/cangjie_stdx
+	url = https://gitcode.com/Cangjie/cangjie_stdx.git

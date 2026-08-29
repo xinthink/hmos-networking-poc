@@ -239,7 +239,7 @@ Axios 实测全部 11 个场景通过（`AxiosScenarios.ets`），以下是它�
 ## stdx.net.http（Cangjie 原生扩展库）实测对比
 
 > 在 `cj-network-compare` 中新增了 **stdx.net.http** 对比组（S1–S11 按钮）：Cangjie
-> 官方扩展标准库（`cangjie_stdx`，v0.60.5.1 源码本地构建 for OHOS aarch64），纯 Cangjie
+> 官方扩展标准库（`cangjie_stdx`，git submodule pin 到 v1.1.3.1 源码本地交叉编译 for OHOS aarch64），纯 Cangjie
 > socket 实现 + OpenSSL dlopen。与 Network Kit 组镜像同一批场景，实测结论如下。
 
 | 场景 | stdx.net.http 实测 | 与 Network Kit 对比 |
@@ -278,6 +278,36 @@ Axios 实测全部 11 个场景通过（`AxiosScenarios.ets`），以下是它�
 6. **构建成本极高**：stdx for OHOS 需本地交叉编译（OpenSSL 头文件 + cjc 1.1.3 兼容
    patch），且 DevEco 6.1 的 cangjie schema 扩展依赖 `@ohos/cangjie-build-support`
    （从 DevEco 插件提取 6.1.280 版）。**不建议常规工程引入**；本仓库集成仅为对比验证。
+
+## stdx 依赖管理方式调研（能否像 Swift SPM 用 git 依赖）
+
+针对"stdx 能否通过 Cangjie package manager 直接管理（类似 Swift SPM 依赖 github
+repo 分支/tag）"的调研结论（2026-08）：
+
+1. **cjpm 支持 git 依赖**（`cjpm.toml` 4-1 源码依赖）：
+   ```toml
+   [dependencies]
+     stdx = { git = "https://gitcode.com/Cangjie/cangjie_stdx.git", branch = "main" }
+     # 或 tag = "v1.1.3.1"
+   ```
+   但 **stdx 旧版（0.60.x）仓库根/源码无 `cjpm.toml`** → git/path 依赖拉取后报
+   `the file '.../cjpm.toml' does not exist`（实测）。**stdx v1.1.3.1+ 根含完整
+   `cjpm.toml`**（`[package] name="stdx"` + 各 target 含 `aarch64-linux-ohos`）——
+   git 依赖可解析；但 link-option 引用 `target/.../static/stdx` 的 **native FFI 库
+   （OpenSSL dlopen 绑定等）仍须 `build.py` 预构建**，cjpm 源码依赖不构建 native。
+2. **官方 stdx-setup 工具**（`setup_stdx.py`，cangjie-coding skill 自带）：按 `cjc -v`
+   版本+平台从官方 release 下载**预编译资产**并自动配置 cjpm.toml，平台映射含
+   `aarch64-linux-ohos → ohos-aarch64`。但 **gitcode 官方 release 目前未发布
+   `cangjie-stdx-ohos-*` 资产**（1.1.3.1 只有 android/linux/mac/windows）→ 对 OHOS
+   **当前不可用**（等官方补发后一键接入）。
+3. **Cangjie 官方包仓库**（`pkg.cangjie-lang.cn/registry`，cangjie-repo.toml 配置）：
+   需账号 token（公开访问 401），cjpm 1.1.3 有 `publish` 但无公开 search。
+4. **落地方式（本仓库采用）**：**git submodule** 管理 stdx 源码
+   （`cj-network-compare/vendor/cangjie_stdx`，pin 到 **v1.1.3.1** tag，免 patch 编译）+
+   `cj-network-compare/scripts/build-stdx.sh` 自动化交叉编译（自动构造 CANGJIE_HOME、
+   探测 OpenSSL 头文件、复制 .so 到 entry/libs）。其他机器 `git clone --recursive` 后
+   跑脚本即可复现，**不依赖本机 stdx 路径**；`cjpm.toml` 用相对路径
+   `../vendor/cangjie_stdx/target/linux_ohos_aarch64_cjnative/dynamic/stdx`。
 
 ## 可行性结论（模拟器实测后更新）
 

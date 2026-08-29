@@ -24,33 +24,34 @@ resources/
 工程根：
 ```
 hvigor/cangjie-build-support-6.1.280.tgz   # DevEco cangjie schema 扩展（从 DevEco 插件提取，构建必需）
-entry/libs/arm64-v8a/*.so                  # stdx 运行时库（gitignored，从 stdx target 复制）
+vendor/cangjie_stdx/                       # stdx 源码（git submodule，pin v1.1.3.1，免 patch）
+scripts/build-stdx.sh                      # stdx 交叉编译脚本（其他机器可复现）
+entry/libs/arm64-v8a/*.so                  # stdx 运行时库（gitignored，脚本产物）
 ```
 
 ## stdx.net.http 集成（对比组 S1–S11）
 
-stdx（Cangjie 扩展标准库）的 OHOS 集成是本工程最重的部分，**只在需要对比 stdx 时**维护：
+stdx（Cangjie 扩展标准库）以 **git submodule** 管理（`vendor/cangjie_stdx`，pin
+`v1.1.3.1`），**其他机器 `git clone --recursive` 后跑脚本即可复现**：
 
-1. **stdx 源码**：`/Users/ywu/ws/sdk/CangjieSDKs/cangjie_stdx`（v0.60.5.1，本地 patch 过
-   RPATH/静态初始化问题）。构建 for OHOS aarch64：
-   ```bash
-   export PATH=$CANGJIE_SDK/build-tools/bin:$PATH
-   export CANGJIE_HOME=/tmp/cjohos   # 构造的 SDK 根（modules/runtime/lib/third_party 符号链接到 6.1 SDK）
-   python3 build.py build -t release --target ohos-aarch64 \
-     --target-toolchain <DevEco native llvm/bin> --target-sysroot <DevEco native sysroot> \
-     --include /opt/homebrew/opt/openssl@3/include --target-lib /opt/homebrew/opt/openssl@3/lib
-   python3 build.py install   # 产物：target/linux_ohos_aarch64_cjnative/{static,dynamic}/stdx
-   ```
-2. **cjpm.toml**：`[target.aarch64-linux-ohos.bin-dependencies]` 的 `path-option` 追加
-   stdx 产物目录（`.../linux_ohos_aarch64_cjnative/dynamic/stdx`，**该目录需含
-   `package.json`**，从 `.../linux_ohos_aarch64_cjnative/package.json` 复制）。
-3. **运行时 .so**：把 `dynamic/stdx/*.so` 复制到 `entry/libs/arm64-v8a/`（gitignored，
-   打包进 hap 供运行时加载）。
+1. **stdx 源码（submodule）**：`git submodule update --init --recursive` 拉取
+   `vendor/cangjie_stdx`（v1.1.3.1，官方 tag，**无需本地 patch**——RPATH 已修复，
+   静态初始化问题 v1.1.3.1 未触发）。
+2. **交叉编译**：`./scripts/build-stdx.sh`（自动：构造 CANGJIE_HOME、探测 OpenSSL
+   头文件、`build.py build/install`、复制 package.json 与 .so 到 entry/libs）。环境变量
+   `CANGJIE_SDK_HOME` / `DEVECO_OH_NATIVE_HOME` / `OPENSSL_INCLUDE` 可覆盖。
+3. **cjpm.toml**：`[target.aarch64-linux-ohos.bin-dependencies]` 的 `path-option` 用
+   **相对路径** `../vendor/cangjie_stdx/target/linux_ohos_aarch64_cjnative/dynamic/stdx`
+   （相对 entry/，`package.json` 由脚本复制进该目录）。
 4. **cangjie schema 扩展**（DevEco 6.1 bug 修复）：hvigor-config.json5 声明
    `"@ohos/cangjie-build-support": "file:cangjie-build-support-6.1.280.tgz"`（从 DevEco
    插件 `~/Library/Application Support/Huawei/DevEcoStudio6.1/plugins/devecostudio-cangjie-plugin-mac-arm-6.1.1.280/lib/hvigor/cangjie-build-support`
    打包，去掉 postinstall）。**devecocli build 必须带 `DEVECO_CANGJIE_PATH=$CANGJIE_SDK`**
    （否则 cangjie 插件走 deleteSchema 分支，build-profile 校验报 cangjieOptions 非法）。
+
+> ⚠️ **hvigor 卡死排查**：本机 node 若切换版本管理（nodenv→mise 等），hvigor daemon
+> 缓存与 node 版本不匹配会**构建卡死**（无输出超时）。解决：删 `~/.hvigor/daemon`、
+> `~/.hvigor/project_caches` 后重建。
 
 ## 常用命令（在 cj-network-compare/ 下执行）
 
