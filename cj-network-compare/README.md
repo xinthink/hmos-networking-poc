@@ -52,14 +52,44 @@ for OHOS）。实测要点：
 - Header 发送小写化、无 HTTP 缓存（delta=2），与 Network Kit 一致。
 - 详细结论见根目录 `COMPARISON.md`「stdx.net.http 实测对比」。
 
-stdx 以 **git submodule** 管理（`vendor/cangjie_stdx`，pin 官方 v1.1.3.1 tag）。其他机器：
+stdx 以 **git submodule** 管理（`vendor/cangjie_stdx`，pin 官方 v1.1.3.1 tag）。产物
+（submodule 内 `target/` 与 `entry/libs/*.so`）不入库，各机器需自己编译。
+
+### 其他机器：首次拉取
 
 ```bash
-git clone --recursive <repo>          # 拉取含 submodule 的仓库
+# 方式 A：克隆时直接带 submodule
+git clone --recursive <repo>
+# 方式 B：已克隆但 submodule 为空
+git submodule update --init --recursive
+
 cd cj-network-compare
-./scripts/build-stdx.sh               # 交叉编译 stdx + 复制 .so（需 cangjie SDK / DevEco native / OpenSSL 头）
+./scripts/build-stdx.sh               # 交叉编译 stdx + 复制 .so（需 cangjie SDK / DevEco native / OpenSSL 头 / ninja+cmake，脚本自动探测）
 DEVECO_CANGJIE_PATH=<cangjie-sdk> devecocli build
 ```
+
+### 其他机器：日常更新
+
+```bash
+git pull                              # 拉主仓库（可能含 submodule pin 更新）
+git submodule update --recursive      # submodule 同步到新 pin 的 commit（没变化则不动）
+./scripts/build-stdx.sh               # 若 submodule 有更新，重新编译产物
+```
+
+### 升级 stdx 上游版本
+
+```bash
+cd vendor/cangjie_stdx
+git fetch origin --tags
+git checkout <新tag>                  # 如 v1.2.0-beta.02.1（先确认与 cjc 1.1.3 兼容）
+cd ../..
+git add vendor/cangjie_stdx           # 记录新 submodule commit
+git commit -m "stdx: bump to <新tag>"
+git push
+```
+
+> submodule URL 在 `.gitmodules`（`https://gitcode.com/Cangjie/cangjie_stdx.git`）；
+> 拉取失败先检查能否访问该地址。
 
 stdx 的 OHOS 集成（交叉编译、DevEco cangjie schema 扩展、.so 打包）很重，步骤与踩坑
 （含 hvigor 卡死排查）见本工程 `AGENTS.md`。

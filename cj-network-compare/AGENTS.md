@@ -49,6 +49,16 @@ stdx（Cangjie 扩展标准库）以 **git submodule** 管理（`vendor/cangjie_
    打包，去掉 postinstall）。**devecocli build 必须带 `DEVECO_CANGJIE_PATH=$CANGJIE_SDK`**
    （否则 cangjie 插件走 deleteSchema 分支，build-profile 校验报 cangjieOptions 非法）。
 
+**submodule 日常操作（其他机器/版本升级）**：
+- 首次拉取：`git clone --recursive <repo>`，或已有克隆执行
+  `git submodule update --init --recursive`。
+- 日常更新：`git pull` → `git submodule update --recursive` → 若 submodule 有变化
+  重跑 `./scripts/build-stdx.sh`。
+- 升级 stdx 版本：`cd vendor/cangjie_stdx && git fetch origin --tags && git checkout
+  <新tag>`（先确认与 cjc 1.1.3 兼容）→ 回仓库根 `git add vendor/cangjie_stdx` 记录
+  新 pin → commit/push。submodule URL 在 `.gitmodules`
+  （`https://gitcode.com/Cangjie/cangjie_stdx.git`）。
+
 > ⚠️ **hvigor 卡死排查**：本机 node 若切换版本管理（nodenv→mise 等），hvigor daemon
 > 缓存与 node 版本不匹配会**构建卡死**（无输出超时）。解决：删 `~/.hvigor/daemon`、
 > `~/.hvigor/project_caches` 后重建。
