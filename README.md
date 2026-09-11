@@ -5,14 +5,20 @@
 > 三方 HTTP 库 `@ohos/axios`（OpenHarmony 版 Axios，底层封装 `@ohos.net.http`）在同一
 > 批场景上的行为差异。
 
-本仓库包含两个独立工程（后续还会继续添加其他工程）：
+本仓库包含以下独立工程（后续还会继续添加其他工程）：
 
 | 目录 | 工程 | 说明 |
 |------|------|------|
 | [`network-compare/`](./network-compare) | HarmonyOS 移动 App | 同一套场景分别用 Network Kit、RCP 与 Axios 实现，UI 上三列并排展示结果 |
+| [`cj-network-compare/`](./cj-network-compare) | 纯 Cangjie App | 11 个场景用 Cangjie Network Kit 实现 + 11 个场景用 `stdx.net.http` 实现（RCP 无 Cangjie 绑定） |
 | [`mock-server/`](./mock-server) | Node.js Mock Server | 同时提供 HTTP/1.1（8080 明文）与 HTTP/2（8443 TLS/ALPN） |
 
-详细的逐项对比矩阵与可行性结论见 [COMPARISON.md](./COMPARISON.md)。
+文档索引：
+
+| 文档 | 内容 |
+|------|------|
+| [`COMPARISON.md`](./COMPARISON.md) | 逐项对比矩阵与可行性结论（本仓库实测） |
+| [`docs/harmonyos-network-libraries.md`](./docs/harmonyos-network-libraries.md) | **技术文档**：四类网络库（Network Kit ArkTS/Cangjie、RCP、Axios、stdx.net.http）的定位、生态、技术原理、优缺点与约束；含架构图与 RCP 进程/内存隔离分析 |
 
 ## 为什么要做这个对比
 
@@ -128,25 +134,32 @@ App 首页顶部可修改服务器地址：
 ├── README.md
 ├── AGENTS.md                     # 仓库根代理指南（含新增子工程规范）
 ├── COMPARISON.md                 # 对比矩阵 + 模拟器实测结果 + 可行性结论
+├── docs/
+│   └── harmonyos-network-libraries.md   # 技术文档：四类网络库定位/原理/优缺点/约束 + 架构图
 ├── mock-server/                  # Node.js mock server（零依赖）
 │   ├── server.mjs                # HTTP/1.1 (:8080) + TLS/ALPN (:8443)
 │   ├── gen-certs.mjs             # 自签名证书生成
 │   ├── README.md                 # 面向使用者
 │   └── AGENTS.md                 # 面向代理
-└── network-compare/              # HarmonyOS App（独立工程）
-    ├── README.md                 # 面向使用者
-    ├── AGENTS.md                 # 面向代理
-    ├── oh-package.json5          # 依赖（含 @ohos/axios）
-    ├── entry/src/main/resources/
-    │   ├── base/profile/network_config.json   # 网络安全配置（明文/信任锚点）
-    │   └── resfile/mock-ca/                   # 应用级信任 CA 证书（cert.pem + <hash>.0）
-    └── entry/src/main/ets/
-        ├── pages/Index.ets              # 对比 UI
-        ├── common/AppConfig.ets         # 服务器地址 + 内嵌 CA
-        ├── model/ScenarioResult.ets     # 结果模型
-        ├── netkit/NetKitScenarios.ets   # Network Kit 场景实现
-        ├── rcp/RcpScenarios.ets         # RCP 场景实现
-        └── axios/AxiosScenarios.ets     # @ohos/axios 场景实现
+├── network-compare/              # HarmonyOS App（独立工程，ArkTS）
+│   ├── README.md                 # 面向使用者
+│   ├── AGENTS.md                 # 面向代理
+│   ├── oh-package.json5          # 依赖（含 @ohos/axios）
+│   ├── entry/src/main/resources/
+│   │   ├── base/profile/network_config.json   # 网络安全配置（明文/信任锚点）
+│   │   └── resfile/mock-ca/                   # 应用级信任 CA 证书（cert.pem + <hash>.0）
+│   └── entry/src/main/ets/
+│       ├── pages/Index.ets              # 对比 UI
+│       ├── common/AppConfig.ets         # 服务器地址 + 内嵌 CA
+│       ├── model/ScenarioResult.ets     # 结果模型
+│       ├── netkit/NetKitScenarios.ets   # Network Kit 场景实现
+│       ├── rcp/RcpScenarios.ets         # RCP 场景实现
+│       └── axios/AxiosScenarios.ets     # @ohos/axios 场景实现
+└── cj-network-compare/           # 纯 Cangjie App（独立工程）
+    ├── README.md                 # 面向使用者（含 stdx 子模块拉取/更新步骤）
+    ├── AGENTS.md                 # 面向代理（stdx 集成、cjpm、构建踩坑）
+    ├── scripts/build-stdx.sh     # stdx 交叉编译脚本
+    └── vendor/cangjie_stdx/      # git submodule（stdx 源码，pin 版本）
 ```
 
 每个子工程均按规范分层维护 `README.md`（面向使用者）+ `AGENTS.md`（面向代理），

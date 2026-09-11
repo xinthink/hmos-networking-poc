@@ -12,6 +12,16 @@ Cookie、Cache（含 ETag）、Multipart、二进制上传等差异。另有第�
 **`@ohos/axios`**（OpenHarmony 版 Axios，底层封装 `@ohos.net.http`），用于观察最流行
 的三方 HTTP 库在同一批场景上的行为差异（详见 `COMPARISON.md`）。
 
+## 文档索引
+
+| 文档 | 内容 |
+|------|------|
+| [`README.md`](README.md) | 仓库总览、快速开始、目录结构 |
+| [`COMPARISON.md`](COMPARISON.md) | 逐项对比矩阵、模拟器实测结果、可行性结论 |
+| [`docs/harmonyos-network-libraries.md`](docs/harmonyos-network-libraries.md) | **技术文档**：四类网络库（Network Kit ArkTS/Cangjie、RCP、`@ohos/axios`、`stdx.net.http`）的定位、生态、技术原理、优缺点与约束限制；含 ① 技术总览架构图 ② RCP 进程/内存/隔离架构图；附可复现的验证命令（hilog pid、编译器级 API 验证、SDK 逆向） |
+
+> 新增文档或子工程时，**必须同步更新本索引与下面的子工程一览表**。
+
 ## 子工程一览（后续会新增其他工程）
 
 | 子工程 | 角色 | 专属指南 | 关键文档 |
@@ -146,14 +156,25 @@ devecocli emulator list / start "Pura 90"
   无 If-None-Match、h1 header 小写化、Netscape cookie 格式、trust-anchors/明文控制
   均与 ArkTS 版 Network Kit 相同）。
 - **Cangjie 特有边界**：`RequestMethod` 无 Patch 且无 `customMethod`；`HttpResponse`
-  无 `connectionExtraInfo`；只有 `caPath`（文件路径）无 `caData`；Network Kit 回调在
+  无 `connectionExtraInfo`；只有 `caPath`（文件路径）无 `caData`——注意 `caData` 在
+  `ohos.net.http.cjo` 接口元数据里**存在**（`Option<String>`）但对调用方**不可见**
+  （构造重载里没有它，赋值报 `can not access field 'caData'`），所以"看符号"会误判；
+  Network Kit 回调在
   后台线程、直接写 `@State` 会崩溃（需 `ResultBridge` 跨线程桥）；无 JSON 库。
   详见 `COMPARISON.md`「Cangjie 语言视角」章节。
 - **stdx.net.http（Cangjie 原生扩展库）对比组**：明文 HTTP 可用（同步 API、支持
-  PATCH、Set-Cookie 标准格式）；**HTTPS 不可用**（dlopen 系统 OpenSSL，模拟器无 →
-  TlsException）；Header 发送小写化、无缓存，与 Network Kit 一致。集成成本极高
+  PATCH、Set-Cookie 标准格式、**内置 `CookieJar` 默认启用**——源码
+  `vendor/cangjie_stdx/src/stdx/net/http/client.cj`）；**HTTPS 不可用**（dlopen 系统
+  OpenSSL，模拟器无 `libssl_openssl.z.so` → TlsException）；Header 发送小写化、
+  无 HTTP 缓存。集成成本极高
   （需交叉编译 + DevEco cangjie schema 扩展），详见 `COMPARISON.md`「stdx.net.http
   实测对比」与 `cj-network-compare/AGENTS.md`。
+- 💡 **Cangjie API 边界的可靠验证方式**：不要只 `strings` `.cjo`。HarmonyOS 的 Cangjie
+  SDK 自带交叉编译器，可脱离 hvigor 直接验证：
+  `CANGJIE_HOME=~/.cangjie-sdk/6.1/cangjie/build-tools`、
+  `CANGJIE_PATH=~/.cangjie-sdk/6.1/cangjie/api/lib/linux_ohos_aarch64_cjnative`，
+  然后 `cjc --target=aarch64-linux-ohos --output-type=staticlib x.cj`。
+  详见 `docs/harmonyos-network-libraries.md` §7「编译器级验证」。
 - ⚠️ **cj-network-compare 构建必须带 `DEVECO_CANGJIE_PATH`** 环境变量（指向 cangjie
   SDK），否则 hvigor 的 cangjie schema 扩展不生效（build-profile 校验报
   cangjieOptions 非法）。
