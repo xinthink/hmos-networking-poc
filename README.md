@@ -132,34 +132,34 @@ App 首页顶部可修改服务器地址：
 ```
 .
 ├── README.md
-├── AGENTS.md                     # 仓库根代理指南（含新增子工程规范）
-├── COMPARISON.md                 # 对比矩阵 + 模拟器实测结果 + 可行性结论
+├── AGENTS.md                     # repo-root agent guide (new-subproject rules)
+├── COMPARISON.md                 # comparison matrix + emulator results + verdict
 ├── docs/
-│   └── harmonyos-network-libraries.md   # 技术文档：四类网络库定位/原理/优缺点/约束 + 架构图
-├── mock-server/                  # Node.js mock server（零依赖）
+│   └── harmonyos-network-libraries.md   # technical doc: 4 HTTP libs, principles, pros/cons + diagrams
+├── mock-server/                  # Node.js mock server (zero dependencies)
 │   ├── server.mjs                # HTTP/1.1 (:8080) + TLS/ALPN (:8443)
-│   ├── gen-certs.mjs             # 自签名证书生成
-│   ├── README.md                 # 面向使用者
-│   └── AGENTS.md                 # 面向代理
-├── network-compare/              # HarmonyOS App（独立工程，ArkTS）
-│   ├── README.md                 # 面向使用者
-│   ├── AGENTS.md                 # 面向代理
-│   ├── oh-package.json5          # 依赖（含 @ohos/axios）
+│   ├── gen-certs.mjs             # self-signed certificate generation
+│   ├── README.md                 # for users
+│   └── AGENTS.md                 # for agents
+├── network-compare/              # HarmonyOS app (standalone project, ArkTS)
+│   ├── README.md                 # for users
+│   ├── AGENTS.md                 # for agents
+│   ├── oh-package.json5          # dependencies (incl. @ohos/axios)
 │   ├── entry/src/main/resources/
-│   │   ├── base/profile/network_config.json   # 网络安全配置（明文/信任锚点）
-│   │   └── resfile/mock-ca/                   # 应用级信任 CA 证书（cert.pem + <hash>.0）
+│   │   ├── base/profile/network_config.json   # network security config (cleartext / trust anchors)
+│   │   └── resfile/mock-ca/                   # app-level trust anchors (cert.pem + <hash>.0)
 │   └── entry/src/main/ets/
-│       ├── pages/Index.ets              # 对比 UI
-│       ├── common/AppConfig.ets         # 服务器地址 + 内嵌 CA
-│       ├── model/ScenarioResult.ets     # 结果模型
-│       ├── netkit/NetKitScenarios.ets   # Network Kit 场景实现
-│       ├── rcp/RcpScenarios.ets         # RCP 场景实现
-│       └── axios/AxiosScenarios.ets     # @ohos/axios 场景实现
-└── cj-network-compare/           # 纯 Cangjie App（独立工程）
-    ├── README.md                 # 面向使用者（含 stdx 子模块拉取/更新步骤）
-    ├── AGENTS.md                 # 面向代理（stdx 集成、cjpm、构建踩坑）
-    ├── scripts/build-stdx.sh     # stdx 交叉编译脚本
-    └── vendor/cangjie_stdx/      # git submodule（stdx 源码，pin 版本）
+│       ├── pages/Index.ets              # comparison UI
+│       ├── common/AppConfig.ets         # server address + embedded CA
+│       ├── model/ScenarioResult.ets     # result model
+│       ├── netkit/NetKitScenarios.ets   # Network Kit scenarios
+│       ├── rcp/RcpScenarios.ets         # RCP scenarios
+│       └── axios/AxiosScenarios.ets     # @ohos/axios scenarios
+└── cj-network-compare/           # pure-Cangjie app (standalone project)
+    ├── README.md                 # for users (stdx submodule pull/update steps)
+    ├── AGENTS.md                 # for agents (stdx integration, cjpm, build pitfalls)
+    ├── scripts/build-stdx.sh     # stdx cross-compile script
+    └── vendor/cangjie_stdx/      # git submodule (stdx source, pinned)
 ```
 
 每个子工程均按规范分层维护 `README.md`（面向使用者）+ `AGENTS.md`（面向代理），

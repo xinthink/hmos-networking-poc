@@ -56,12 +56,12 @@ devecocli run --device "Pura 90"                 # 构建+安装+启动（debug 
 
 ```
 ets/
-├── pages/Index.ets               # 对比 UI：场景卡片 + 三列结果
-├── common/AppConfig.ets          # 服务器 host/端口 + 内嵌 CA PEM
-├── model/ScenarioResult.ets      # 结果模型（ok/summary/detail/statusCode）
-├── netkit/NetKitScenarios.ets    # Network Kit 场景实现
-├── rcp/RcpScenarios.ets          # RCP 场景实现
-└── axios/AxiosScenarios.ets      # @ohos/axios 场景实现
+├── pages/Index.ets               # comparison UI: scenario cards + three result columns
+├── common/AppConfig.ets          # server host/port + embedded CA PEM
+├── model/ScenarioResult.ets      # result model (ok/summary/detail/statusCode)
+├── netkit/NetKitScenarios.ets    # Network Kit scenarios
+├── rcp/RcpScenarios.ets          # RCP scenarios
+└── axios/AxiosScenarios.ets      # @ohos/axios scenarios
 ```
 
 ## 与 mock-server 的协作

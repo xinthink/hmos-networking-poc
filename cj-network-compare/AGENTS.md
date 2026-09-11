@@ -13,20 +13,20 @@ API 24），用于验证 **Cangjie 语言下 Network Kit 的 HTTP 能力**。改
 
 ```
 cangjie/
-├── index.cj                    # 全部 11 个 Network Kit 场景 + 11 个 stdx 场景 + UI（EntryView）
-├── main_ability.cj             # MainAbility（loadContent("EntryView")）
-└── ability_*.cj / module_entry_entry.cj   # 模板生成的 ability/stage 文件
+├── index.cj                    # all 11 Network Kit + 11 stdx scenarios + UI (EntryView)
+├── main_ability.cj             # MainAbility (loadContent("EntryView"))
+└── ability_*.cj / module_entry_entry.cj   # template-generated ability/stage files
 resources/
-├── base/profile/network_config.json   # 网络安全配置（trust-anchors + component-config）
-└── resfile/mock-ca/            # 自签 CA：cert.pem + <hash>.0（caPath 指向这里）
+├── base/profile/network_config.json   # network security config (trust-anchors + component-config)
+└── resfile/mock-ca/            # self-signed CA: cert.pem + <hash>.0 (caPath points here)
 ```
 
 工程根：
 ```
-hvigor/cangjie-build-support-6.1.280.tgz   # DevEco cangjie schema 扩展（从 DevEco 插件提取，构建必需）
-vendor/cangjie_stdx/                       # stdx 源码（git submodule，pin v1.1.3.1，免 patch）
-scripts/build-stdx.sh                      # stdx 交叉编译脚本（其他机器可复现）
-entry/libs/arm64-v8a/*.so                  # stdx 运行时库（gitignored，脚本产物）
+hvigor/cangjie-build-support-6.1.280.tgz   # DevEco cangjie schema extension (extracted from the DevEco plugin; required to build)
+vendor/cangjie_stdx/                       # stdx source (git submodule, pinned v1.1.3.1, no patch needed)
+scripts/build-stdx.sh                      # stdx cross-compile script (reproducible on other machines)
+entry/libs/arm64-v8a/*.so                  # stdx runtime libraries (gitignored; produced by the script)
 ```
 
 ## stdx.net.http 集成（对比组 S1–S11）

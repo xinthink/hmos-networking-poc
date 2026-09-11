@@ -8,12 +8,12 @@ HarmonyOS App（bundle `com.example.networkcompare`，targetSdk `6.1.1(24)` / AP
 
 ```
 ets/
-├── pages/Index.ets               # 对比 UI：场景卡片列表 + Network Kit/RCP/Axios 三列结果
-├── common/AppConfig.ets          # 服务器 host/端口 + 内嵌 CA PEM（MOCK_CA_PEM）
-├── model/ScenarioResult.ets      # 场景结果模型（ok/summary/detail/statusCode）
-├── netkit/NetKitScenarios.ets    # Network Kit (@kit.NetworkKit) 场景实现
-├── rcp/RcpScenarios.ets          # RCP (@kit.RemoteCommunicationKit) 场景实现
-└── axios/AxiosScenarios.ets      # @ohos/axios 场景实现（见下方 Axios 特有事实）
+├── pages/Index.ets               # comparison UI: scenario cards + Network Kit/RCP/Axios columns
+├── common/AppConfig.ets          # server host/port + embedded CA PEM (MOCK_CA_PEM)
+├── model/ScenarioResult.ets      # scenario result model (ok/summary/detail/statusCode)
+├── netkit/NetKitScenarios.ets    # Network Kit (@kit.NetworkKit) scenarios
+├── rcp/RcpScenarios.ets          # RCP (@kit.RemoteCommunicationKit) scenarios
+└── axios/AxiosScenarios.ets      # @ohos/axios scenarios (see Axios notes below)
 ```
 
 ## 常用命令（在 network-compare/ 下执行）
