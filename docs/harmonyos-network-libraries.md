@@ -47,35 +47,35 @@
 
 ```mermaid
 graph TB
-    subgraph APP["应用程序进程（每个应用独立沙箱 / 独立 uid）"]
+    subgraph APP["Application process (per-app sandbox / separate uid)"]
         direction TB
-        subgraph CODE["业务代码"]
+        subgraph CODE["App code"]
             C1["ArkTS / ArkUI"]
             C2["Cangjie"]
         end
-        subgraph API["框架 API 层（应用进程内）"]
+        subgraph API["Framework API layer (inside app process)"]
             NK_TS["Network Kit<br/>@ohos.net.http<br/>(ArkTS)"]
-            NK_CJ["Network Kit<br/>kit.NetworkKit<br/>(Cangjie 绑定)"]
-            RCP_TS["RCP<br/>@kit.RemoteCommunicationKit<br/>(ArkTS; hms 闭源)"]
-            AX["@ohos/axios<br/>(三方, 适配 Network Kit)"]
-            SX["stdx.net.http<br/>(Cangjie 官方扩展库)"]
+            NK_CJ["Network Kit<br/>kit.NetworkKit<br/>(Cangjie binding)"]
+            RCP_TS["RCP<br/>@kit.RemoteCommunicationKit<br/>(ArkTS; closed-source hms)"]
+            AX["@ohos/axios<br/>(3rd-party, wraps Network Kit)"]
+            SX["stdx.net.http<br/>(official Cangjie extension lib)"]
         end
-        subgraph RT["网络运行时（应用进程内）"]
-            NS["netstack HTTP/NAPI<br/>libnet_http.so 等<br/>(HTTP/1.1·HTTP/2·WebSocket)"]
-            RCPRT["RCP 网络实现<br/>NETSTACK_RCP<br/>(HTTP/1.1·HTTP/2·拦截器·缓存·CookieJar)"]
-            SXRT["stdx.net.http<br/>纯 Cangjie socket + TLS"]
+        subgraph RT["Network runtime (inside app process)"]
+            NS["netstack HTTP/NAPI<br/>libnet_http.so etc.<br/>(HTTP/1.1, HTTP/2, WebSocket)"]
+            RCPRT["RCP network impl<br/>NETSTACK_RCP<br/>(HTTP/1.1, HTTP/2, interceptors, cache, CookieJar)"]
+            SXRT["stdx.net.http<br/>pure Cangjie socket + TLS"]
         end
     end
 
-    subgraph SYS["系统服务进程（全设备共享，按 caller 身份 uid/pid 记账）"]
-        NM["netmanager<br/>网络策略 / 权限校验"]
-        NSN["netsysnative<br/>连接/网络栈原生服务"]
-        CFW["CollaborationFw<br/>协作框架（RCP 能力域）"]
+    subgraph SYS["System service processes (device-wide, accounted per caller uid/pid)"]
+        NM["netmanager<br/>network policy / permission checks"]
+        NSN["netsysnative<br/>connection & netstack native service"]
+        CFW["CollaborationFw<br/>collaboration framework (RCP capability domain)"]
     end
 
-    subgraph OS["系统与内核"]
-        K["Linux 内核网络栈（socket / TCP·TLS）"]
-        TLS["系统 TLS 库<br/>(netstack: libnet_ssl.so)"]
+    subgraph OS["System & kernel"]
+        K["Linux kernel network stack (socket / TCP, TLS)"]
+        TLS["System TLS library<br/>(netstack: libnet_ssl.so)"]
         OSSL["OpenSSL<br/>(OHOS: libssl_openssl.z.so)"]
     end
 
@@ -84,15 +84,15 @@ graph TB
     C1 --> AX
     C2 --> NK_CJ
     C2 --> SX
-    AX -. "底层调用（同一实现）" .-> NK_TS
+    AX -. "calls same underlying impl" .-> NK_TS
     NK_TS --> NS
     NK_CJ --> NS
     RCP_TS --> RCPRT
     SX --> SXRT
 
-    NS -. "IPC（策略/权限/网络切换）" .-> NM
+    NS -. "IPC: policy / permission / network switch" .-> NM
     NS --> NSN
-    RCPRT -. "IPC（能力域/策略）" .-> CFW
+    RCPRT -. "IPC: capability domain / policy" .-> CFW
     RCPRT --> NSN
 
     NS --> TLS
@@ -109,6 +109,10 @@ graph TB
     class AX open
     class SX,SXRT,OSSL cross
 ```
+
+> 图注（英文标签对照）：`API`/`RT` 两层与 `CODE` 同属 `APP`（应用进程）；
+> `SYS` 为设备级共享系统服务；`OS` 为系统库与内核。
+> 红色 = 闭源（hms）；蓝色 = OpenHarmony 开源栈；绿色 = 跨平台 Cangjie 扩展库。
 
 **读图要点**：
 
@@ -339,34 +343,34 @@ cjc 版本 + 平台发布预编译资产）、cjpm 包结构（v1.1.3.1 起根�
 
 ```mermaid
 graph TB
-    subgraph PA["应用 A 进程（沙箱：独立 uid / 独立内存空间 / SELinux 域）"]
+    subgraph PA["App A process (sandbox: own uid / own memory space / SELinux domain)"]
         direction TB
         AJS["ArkTS: rcp.createSession / session.get ..."]
-        ART["RCP 网络实现（NETSTACK_RCP，日志 pid = 应用进程）<br/>• HTTP/1.1 · HTTP/2 协议处理<br/>• TLS 握手（应用侧 CA 校验）<br/>• CookieJar / ResponseCache / 拦截器<br/>• 连接池、报文缓冲（明文只在 A 进程内存）<br/>• 由应用进程内 FFRT 工作线程驱动（实测 28→35→36）"]
-        AIPC["OS_IPC_* 线程（与系统服务通信）"]
+        ART["RCP network impl (NETSTACK_RCP, log pid = app process)<br/>- HTTP/1.1 &amp; HTTP/2 protocol handling<br/>- TLS handshake (app-side CA validation)<br/>- CookieJar / ResponseCache / interceptors<br/>- connection pool, message buffers (plaintext stays in A's memory)<br/>- driven by in-process FFRT worker threads (measured 28-&gt;35-&gt;36)"]
+        AIPC["OS_IPC_* threads (talk to system services)"]
         AJS --> ART
         ART --> AIPC
     end
 
-    subgraph PB["应用 B 进程（另一沙箱：独立 uid / 独立内存空间）"]
+    subgraph PB["App B process (another sandbox: own uid / own memory space)"]
         direction TB
         BJS["ArkTS: rcp.*"]
-        BRT["RCP 网络实现（独立实例）<br/>• 连接池/CookieJar/缓存 均独立"]
+        BRT["RCP network impl (separate instance)<br/>- connection pool / CookieJar / cache all independent"]
         BJS --> BRT
     end
 
-    subgraph SYS["系统服务进程（设备级共享，不持有应用明文报文）"]
-        NM["netmanager<br/>网络策略 · 权限校验（按 caller uid/pid）"]
-        NSN["netsysnative<br/>连接管理 · socket/TCP 支撑"]
-        CFW["CollaborationFw<br/>协作能力域（RCP/urpc）"]
+    subgraph SYS["System service processes (device-wide shared, hold no app plaintext)"]
+        NM["netmanager<br/>network policy, permission checks (per caller uid/pid)"]
+        NSN["netsysnative<br/>connection management, socket/TCP support"]
+        CFW["CollaborationFw<br/>collaboration capability domain (RCP/urpc)"]
     end
 
-    subgraph KER["内核 & 网络"]
-        KNET["Linux 内核网络栈<br/>socket → TCP → 网卡"]
-        NET["目标服务器"]
+    subgraph KER["Kernel & network"]
+        KNET["Linux kernel network stack<br/>socket -> TCP -> NIC"]
+        NET["Target server"]
     end
 
-    AIPC -. "IPC：请求网络策略/切换通知<br/>(系统侧按 uid/pid 记账，日志实证)" .-> NM
+    AIPC -. "IPC: request policy / switch notification<br/>(accounted per uid/pid server-side, log-verified)" .-> NM
     ART --> NSN
     BRT --> NSN
     BRT -. "IPC" .-> NM
@@ -374,9 +378,12 @@ graph TB
     NSN --> KNET
     KNET --> NET
 
-    MEM1["进程内存边界（内核强制）<br/>A 的报文缓冲 ≠ B 的报文缓冲"]
+    MEM1["Process memory boundary (enforced by kernel)<br/>buffers of A != buffers of B"]
     style MEM1 fill:#fff3cd,stroke:#856404,stroke-dasharray: 5 5
 ```
+
+> 图注（英文标签对照）：`PA`/`PB` 为两个独立应用进程沙箱；`SYS` 为设备级共享系统服务；
+> `KER` 为内核与网络；虚线节点 `MEM1` 表示内核强制的进程内存边界。
 
 **RCP 的进程/调度模型（实证结论）**：
 
