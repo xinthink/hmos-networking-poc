@@ -44,7 +44,10 @@ devecocli run --device "Pura 90"                 # 构建+安装+启动（debug 
 | 14 | NSC × RCP: `remoteValidation='skip'` | RCP 独有：绕过全部证书校验（Network Kit/Axios 为 N/A） |
 | 15 | NSC × RCP: `ValidationCallback` | RCP 独有：自定义校验完全替换默认信任逻辑 |
 
-> 场景 10–15 可一次跑完：点首页顶部 **「自检 NSC × RCP 组（结果写 hilog）」** 按钮，
+> 场景 10–15 由独立模块 `entry/src/main/ets/nsc/` 提供（**NSC 验证套件**），
+> 说明、结果矩阵与跨系统版本复验流程见 [`NSC-VERIFICATION.md`](NSC-VERIFICATION.md)。
+>
+> 这 6 个场景可一次跑完：点首页顶部 **「自检 NSC × RCP 组（结果写 hilog）」** 按钮，
 > 结果同时写入 hilog（关键字 `NSCTEST`），便于无头验证：
 > `devecocli log --device "Pura 90" --bundle-name com.example.networkcompare --keyword NSCTEST --from 5m --tail 100`
 > ⚠️ 这些场景依赖 `network_config.json`，改配置需重新构建部署；矩阵与变体实验见

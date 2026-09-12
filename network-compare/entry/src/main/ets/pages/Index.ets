@@ -7,28 +7,14 @@
 import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { AppConfig } from '../common/AppConfig';
+import { ScenarioDef, ScenarioRunner, ScenarioSink } from '../model/ScenarioDef';
 import { ScenarioResult } from '../model/ScenarioResult';
 import { NetKitScenarios } from '../netkit/NetKitScenarios';
 import { RcpScenarios } from '../rcp/RcpScenarios';
 import { AxiosScenarios } from '../axios/AxiosScenarios';
+import { NscSuite } from '../nsc/NscSuite';
 
 const TAG = 'NetCompare';
-
-/**
- * Scenario keys covered by the headless NSCTEST self-test — the
- * "NSC × RCP security configuration" group plus the two original NSC cards.
- */
-const SELF_TEST_KEYS: string[] = ['nscTrust', 'nscCleartext', 'nscTrustSystem',
-  'nscTrustCa', 'nscTrustSkip', 'nscTrustCallback'];
-
-interface ScenarioDef {
-  key: string;
-  title: string;
-  desc: string;
-  netKit: () => Promise<ScenarioResult>;
-  rcp: () => Promise<ScenarioResult>;
-  axios: () => Promise<ScenarioResult>;
-}
 
 @Entry
 @Component
@@ -52,7 +38,7 @@ struct Index {
   }
 
   private scenarios(): ScenarioDef[] {
-    return [
+    const cards: ScenarioDef[] = [
       {
         key: 'protocol',
         title: '协议协商 (HTTP/1.1 vs HTTP/2)',
@@ -125,55 +111,13 @@ struct Index {
         rcp: RcpScenarios.binaryUpload,
         axios: AxiosScenarios.binaryUpload,
       },
-      {
-        key: 'nscTrust',
-        title: '网络安全配置: trust-anchors (应用级信任 CA)',
-        desc: 'network_config.json base-config.trust-anchors 指向 resfile/mock-ca。本场景不带任何代码级 CA（Network Kit 无 caData，RCP 无 remoteValidation，axios 无 caPath），成功则证明系统级信任锚点对该框架生效。',
-        netKit: NetKitScenarios.nscTrustAnchors,
-        rcp: RcpScenarios.nscTrustAnchors,
-        axios: AxiosScenarios.nscTrustAnchors,
-      },
-      {
-        key: 'nscCleartext',
-        title: '网络安全配置: 明文权限 (component-config)',
-        desc: 'network_config.json 配置 cleartextTrafficPermitted=true 且 component-config 按框架开启明文。axios 底层走 net.http，受 "Network Kit" 组件配置约束。此处探测当前明文权限是否生效。',
-        netKit: NetKitScenarios.nscCleartext,
-        rcp: RcpScenarios.nscCleartext,
-        axios: AxiosScenarios.nscCleartext,
-      },
-      {
-        key: 'nscTrustSystem',
-        title: 'NSC × RCP 信任优先级: remoteValidation=\'system\'',
-        desc: 'RCP 显式指定 \'system\'（也是缺省值，= 设备系统 CA 库）；Network Kit/Axios 不带代码级 CA（走 NSC trust-anchors）。network_config.json 已把 mock CA 配为 trust-anchor，对比三方是否采信——以此判定"两种 config 谁优先"。',
-        netKit: NetKitScenarios.nscTrustAnchors,
-        rcp: RcpScenarios.nscTrustSystem,
-        axios: AxiosScenarios.nscTrustAnchors,
-      },
-      {
-        key: 'nscTrustCa',
-        title: 'NSC × RCP 信任优先级: 代码级 CA 覆盖默认',
-        desc: 'RCP remoteValidation={content} / Network Kit caData / axios caPath 显式信任 mock CA，验证代码级信任是否覆盖默认 system（也即是否独立于 NSC）。',
-        netKit: NetKitScenarios.nscTrustCa,
-        rcp: RcpScenarios.nscTrustCa,
-        axios: () => AxiosScenarios.nscTrustCa(this.filesDir),
-      },
-      {
-        key: 'nscTrustSkip',
-        title: 'NSC × RCP: remoteValidation=\'skip\' 绕过全部校验',
-        desc: 'RCP 独有能力：跳过全部证书校验（自签证书直接通过）。Network Kit/Axios 无对应选项（N/A）。',
-        netKit: NetKitScenarios.nscTrustSkip,
-        rcp: RcpScenarios.nscTrustSkip,
-        axios: AxiosScenarios.nscTrustSkip,
-      },
-      {
-        key: 'nscTrustCallback',
-        title: 'NSC × RCP: ValidationCallback 自定义校验',
-        desc: 'RCP 独有能力：自定义证书校验回调完全替换默认信任逻辑。本例回调用 networkSecurity.certVerificationSync 只认系统 CA 库（自签证书将失败）——证明 callback 是 RCP 复刻 NSC 语义的唯一手段。Network Kit/Axios 无对应选项（N/A）。',
-        netKit: NetKitScenarios.nscTrustCallback,
-        rcp: RcpScenarios.nscTrustCallback,
-        axios: AxiosScenarios.nscTrustCallback,
-      },
     ];
+    // The NSC verification group lives in ets/nsc/ — see NSC-VERIFICATION.md.
+    const nsc = NscSuite.cards(this.filesDir);
+    for (let i = 0; i < nsc.length; i++) {
+      cards.push(nsc[i]);
+    }
+    return cards;
   }
 
   private async runNetKit(key: string, fn: () => Promise<ScenarioResult>): Promise<void> {
@@ -219,36 +163,17 @@ struct Index {
   }
 
   /**
-   * Run the NSC × RCP group in one go and log every result to hilog
-   * (TAG=NetCompare, keyword NSCTEST). This makes the matrix verifiable
-   * headlessly — read it with:
+   * Run the NSC verification suite in one go. The suite itself lives in
+   * `ets/nsc/` (NscSuite) — it logs every result to hilog (TAG=NetCompare,
+   * keyword NSCTEST, with an ENV line carrying OS + API level) and hands each
+   * result back here through `sink` so the on-screen slots fill up too.
+   *
+   * Read headlessly with:
    *   devecocli log --device "Pura 90" --bundle-name com.example.networkcompare --keyword NSCTEST
-   * The normal on-screen result slots are filled at the same time.
    */
   private async runSelfTest(): Promise<void> {
     this.busy = this.copyWith(this.busy, 'selftest', true);
-    const defs = this.scenarios();
-    for (let i = 0; i < defs.length; i++) {
-      const s = defs[i];
-      if (!SELF_TEST_KEYS.includes(s.key)) {
-        continue;
-      }
-      await this.selfTestOne(s.key, 'netkit', s.netKit);
-      await this.selfTestOne(s.key, 'rcp', s.rcp);
-      await this.selfTestOne(s.key, 'axios', s.axios);
-    }
-    this.busy = this.copyWith(this.busy, 'selftest', false);
-    hilog.info(0x0000, TAG, 'NSCTEST group done');
-  }
-
-  /** Run one scenario, log a single NSCTEST line, and fill its UI slot. */
-  private async selfTestOne(key: string, runner: string,
-                            fn: () => Promise<ScenarioResult>): Promise<void> {
-    let line: string = '';
-    try {
-      const r = await fn();
-      line = `${r.ok ? 'OK' : 'FAIL'} status=${r.statusCode} | ${r.summary}`;
-      const text = `${r.ok ? '[OK]' : '[FAIL]'} ${r.summary}\n${r.detail}`;
+    const sink: ScenarioSink = (key: string, runner: ScenarioRunner, text: string) => {
       if (runner === 'netkit') {
         this.netKitResults = this.copyWith(this.netKitResults, key, text);
       } else if (runner === 'rcp') {
@@ -256,11 +181,12 @@ struct Index {
       } else {
         this.axiosResults = this.copyWith(this.axiosResults, key, text);
       }
-    } catch (e) {
-      const err = e as Error;
-      line = `EXC | ${err.message ?? e}`;
+    };
+    try {
+      await NscSuite.runSelfTest(this.filesDir, sink);
+    } finally {
+      this.busy = this.copyWith(this.busy, 'selftest', false);
     }
-    hilog.info(0x0000, TAG, 'NSCTEST %{public}s %{public}s %{public}s', key, runner, line);
   }
 
   /** Immutable-style update: returns a new record so @State re-renders. */

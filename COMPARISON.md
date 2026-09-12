@@ -223,6 +223,11 @@ Axios 实测全部 11 个场景通过（`AxiosScenarios.ets`），以下是它�
   置 true 后才被拦截（1007900201）。
 - 即：**明文看 NSC（组件开关），信任看 RCP 自身配置**。
 
+> 实现位置：**独立模块** `network-compare/entry/src/main/ets/nsc/`
+> （`NscSuite` / `NscRcp` / `NscNetKit` / `NscAxios` / `NscEnv`）。
+> 套件说明、逐版本结果矩阵、**系统升级后的手工复验流程**见
+> [`network-compare/NSC-VERIFICATION.md`](network-compare/NSC-VERIFICATION.md)。
+
 **复现方式**
 
 ```bash

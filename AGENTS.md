@@ -18,6 +18,7 @@ Cookie、Cache（含 ETag）、Multipart、二进制上传等差异。另有第�
 |------|------|
 | [`README.md`](README.md) | 仓库总览、快速开始、目录结构 |
 | [`COMPARISON.md`](COMPARISON.md) | 逐项对比矩阵、模拟器实测结果、可行性结论 |
+| [`network-compare/NSC-VERIFICATION.md`](network-compare/NSC-VERIFICATION.md) | **NSC 验证套件文档**：`ets/nsc/` 模块地图、6 场景清单、按系统版本的结果矩阵、跨版本手工复验流程、明文 build-variant 实验、已知坑 |
 | [`docs/harmonyos-network-libraries.md`](docs/harmonyos-network-libraries.md) | **技术文档**：四类网络库（Network Kit ArkTS/Cangjie、RCP、`@ohos/axios`、`stdx.net.http`）的定位、生态、技术原理、优缺点与约束限制；含 ① 技术总览架构图 ② RCP 进程/内存/隔离架构图；附可复现的验证命令（hilog pid、编译器级 API 验证、SDK 逆向） |
 
 > 新增文档或子工程时，**必须同步更新本索引与下面的子工程一览表**。

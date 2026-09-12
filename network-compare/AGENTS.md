@@ -8,13 +8,24 @@ HarmonyOS App（bundle `com.example.networkcompare`，targetSdk `6.1.1(24)` / AP
 
 ```
 ets/
-├── pages/Index.ets               # comparison UI: scenario cards + Network Kit/RCP/Axios columns
+├── pages/Index.ets               # comparison UI: 9 regular cards + NscSuite cards + self-test button
 ├── common/AppConfig.ets          # server host/port + embedded CA PEM (MOCK_CA_PEM)
 ├── model/ScenarioResult.ets      # scenario result model (ok/summary/detail/statusCode)
-├── netkit/NetKitScenarios.ets    # Network Kit (@kit.NetworkKit) scenarios
-├── rcp/RcpScenarios.ets          # RCP (@kit.RemoteCommunicationKit) scenarios
-└── axios/AxiosScenarios.ets      # @ohos/axios scenarios (see Axios notes below)
+├── model/ScenarioDef.ets         # card interface + runner/sink types (shared by UI and suites)
+├── netkit/NetKitScenarios.ets    # Network Kit scenarios, NSC excluded
+├── rcp/RcpScenarios.ets          # RCP scenarios, NSC excluded
+├── axios/AxiosScenarios.ets      # @ohos/axios scenarios, NSC excluded (see Axios notes below)
+└── nsc/                          # NSC verification suite, self-contained
+    ├── NscSuite.ets              # card registry + headless self-test runner (single entry point)
+    ├── NscRcp.ets                # RCP column: 6 scenarios + 5 session builders
+    ├── NscNetKit.ets             # Network Kit column: control + N/A placeholders
+    ├── NscAxios.ets              # axios column: control + N/A placeholders
+    └── NscEnv.ets                # OS/API-level stamp for cross-version comparison
 ```
+
+> **NSC 验证已独立成模块**（`ets/nsc/`）：改 RCP × NSC 的验证只需动这个目录，
+> `Index.ets` 只调用 `NscSuite.cards()` / `NscSuite.runSelfTest()`。套件说明、结果矩阵、
+> **跨系统版本手工复验流程**：见 [`NSC-VERIFICATION.md`](NSC-VERIFICATION.md)。
 
 ## 常用命令（在 network-compare/ 下执行）
 
@@ -46,9 +57,16 @@ devecocli log --device "Pura 90" --bundle-name com.example.networkcompare --from
    （T/R/D，默认值是 `any`/`unknown` 会被编译拒绝），文件顶部已定义
    `AxiosJsonResp` / `AxiosObjResp` / `AxiosJsonErr` 别名；PATCH 用
    `axios.request({ method: 'PATCH' })`（2.2.13 的 .d.ts 漏了 `patch` 方法）。
-5. **pages/Index.ets**：在 `scenarios()` 数组加卡片，`key` 唯一，`netKit` / `rcp` /
-   `axios` 指向上述方法（需要 `filesDir` 的场景用闭包 `() => XxxScenarios.xxx(this.filesDir)`）。
+5. **pages/Index.ets**：在 `scenarios()` 的 `cards` 数组加卡片，`key` 唯一，
+   `netKit` / `rcp` / `axios` 指向上述方法（需要 `filesDir` 的场景用闭包
+   `() => XxxScenarios.xxx(this.filesDir)`）。
 6. 构建 → 部署 → 模拟器点击验证（见"验证流程"）。
+
+> **例外：安全配置（NSC）相关场景不要加进上面三个 runner**，加到 `ets/nsc/` 套件里：
+> 在 `NscRcp.ets` / `NscNetKit.ets` / `NscAxios.ets` 加同名方法 → 在 `NscSuite.cards()`
+> 注册卡片 → 把 key 加进 `NscSuite.KEYS`（自检会跑它）。若该能力只存在于 RCP，
+> 另两列返回 `ScenarioResult(true, 'N/A — 无对应能力', ...)` 占位。
+> 详见 [`NSC-VERIFICATION.md`](NSC-VERIFICATION.md)。
 
 ## 关键 API 事实（写代码前必读）
 
@@ -59,6 +77,9 @@ devecocli log --device "Pura 90" --bundle-name com.example.networkcompare --from
 - **无 `any`**：JSON 解析统一 `JSON.parse(s) as Record<string, ...>`。
 - `@State` 变量重新赋值才触发渲染：`Record`/数组用 `this.copyWith(...)` 生成新对象再
   赋值，不要原地改（`Index.ets` 已有该 helper）。
+- **helper 返回值赋给局部变量时要显式标注类型**：`const config: AxiosRequestConfig =
+  X.baseConfig();`。省略标注会触发 `arkts-no-any-unknown`（推断穿不过 helper 返回值），
+  本仓库在 `NscAxios.ets` 踩过。
 
 ### API 24 (6.1.1) 能力边界
 - Network Kit `RequestMethod.PATCH` **API 26 才有**；API 24 用
@@ -122,14 +143,15 @@ devecocli log --device "Pura 90" --bundle-name com.example.networkcompare --from
   - **优先级**：信任看 RCP 自身 `SecurityConfiguration`（NSC 零作用）；明文看 NSC
     组件开关（RCP 无明文字段），且 **组件开关 > 全局开关**。
   - ⚠️ 配置随 HAP 打包，**改动必须重新 build + 重装**（见下方"明文变体实验"）。
-- ⚠️ `RcpScenarios.newCallbackSession()` 用 `networkSecurity.certVerificationSync`
+- ⚠️ `NscRcp.newCallbackSession()` 用 `networkSecurity.certVerificationSync`
   校验链——它对自签/不受信证书**抛异常**而非返回非 0，因此该处必须 try/catch 并映射为
   "拒绝"，否则异常会穿透 RCP 的校验回调。
 
 ### 无头验证：自检按钮 + NSCTEST 日志（推荐，别硬拖 UI）
 UI 顶部有一个 **「自检 NSC × RCP 组（结果写 hilog）」** 按钮：一次点击顺序跑完
-`SELF_TEST_KEYS`（`nscTrust`、`nscCleartext`、`nscTrustSystem`、`nscTrustCa`、
-`nscTrustSkip`、`nscTrustCallback`）× 三框架，并把每行结果写 hilog：
+`NscSuite.KEYS`（`nscTrust`、`nscCleartext`、`nscTrustSystem`、`nscTrustCa`、
+`nscTrustSkip`、`nscTrustCallback`）× 三框架（`NscSuite.runSelfTest()`，在 `ets/nsc/` 内），
+并把每行结果写 hilog；结果同时回填 UI 三列：
 
 ```bash
 hdc -t 127.0.0.1:5555 shell "hilog -r"
@@ -139,7 +161,9 @@ devecocli log --device "Pura 90" --bundle-name com.example.networkcompare \
   --keyword NSCTEST --from 5m --tail 100 | grep NSCTEST
 ```
 
-输出形如 `NSCTEST nscTrustSystem rcp FAIL status=1007900060 | 'system' rejected: ...`。
+输出形如 `NSCTEST nscTrustSystem rcp FAIL status=1007900060 | 'system' rejected: ...`，
+首尾另有 `NSCTEST ENV/DONE ...` 行**携带系统版本**（`osFullName` + `api=` + `deviceType`
++ `displayVersion`），所以日志自带版本标签，跨系统版本对比时不需要另做记录。
 
 **为什么要有这个按钮**：`uitest dumpLayout` 在本 App 上一次往返约 2–5 秒，14 张卡片的
 列表需要反复滚动+重定位，逐卡点击极慢且会被"结果区下移"打乱坐标；自检按钮把
@@ -159,10 +183,17 @@ devecocli log --device "Pura 90" --bundle-name com.example.networkcompare \
 流程：改 JSON → `devecocli build` → `devecocli run --device "Pura 90" --skip-build --uninstall`
 → 点自检 → 读 NSCTEST → **实验结束后 `git checkout -- <config>` 还原并重建**。
 
-### 场景卡片说明：RCP × NSC 组（4 张）
-`nscTrustSystem`（显式 `'system'`）、`nscTrustCa`（代码级 CA 覆盖默认）、
-`nscTrustSkip`、`nscTrustCallback`。后两张是 **RCP 独有能力**，Network Kit/axios 列返回
+### 跨系统版本复验（系统升级后手工做一次）
+完整流程与结果矩阵见 [`NSC-VERIFICATION.md`](NSC-VERIFICATION.md) §5/§6：
+跑一次自检 → 记下 `ENV` 行版本 → 与矩阵逐行比对（重点看 RCP 的信任/明文行为与错误码
+`1007900060` / `1007900201` 是否变化）→ 把结果填进矩阵并在 `../COMPARISON.md` 补差异说明。
+
+### 场景卡片说明：NSC 组（6 张，全部来自 `ets/nsc/`）
+`nscTrust`（纯靠 NSC trust-anchors）、`nscCleartext`、`nscTrustSystem`（显式 `'system'`）、
+`nscTrustCa`（代码级 CA 覆盖默认）、`nscTrustSkip`、`nscTrustCallback`。
+后两张是 **RCP 独有能力**，Network Kit/axios 列返回
 `ScenarioResult(true, 'N/A — 无对应能力', ...)` 占位（不复用 `error()`，避免 UI 显示 [FAIL]）。
+卡片顺序由 `NscSuite.cards()` 决定，UI 里排在 9 张常规卡片之后。
 
 ### 服务器可达性
 - 模拟器访问宿主机：`10.0.2.2`（`AppConfig.host` 默认值，UI 顶部可改）。
