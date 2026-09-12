@@ -139,8 +139,8 @@ devecocli emulator list / start "Pura 90"
 | Cache (max-age) | ❌ 默认 `usingCache: true` 实测未命中 | ✅ `ResponseCache` 命中 | ❌ 无缓存 API（`config.cache` 仅 HttpClient 适配器），实测未命中 |
 | Cache + ETag (304) | ❌ 未发送 If-None-Match | ✅ If-None-Match → 304 → 复用缓存 | ❌ 无自动；手动可用但 **304 默认被 validateStatus 拒绝** |
 | Multipart / 二进制上传 | ✅ | ✅ | ✅（`axios.FormData` / `data:ArrayBuffer`） |
-| 网络安全配置: trust-anchors | ✅ 遵循 network_config.json 应用级信任锚点（base+domain 都需配置） | ❌ 不遵循；须代码级 `remoteValidation` | ✅ 遵循（跟随 net.http，同 Network Kit） |
-| 网络安全配置: 明文控制 | ✅ 受 component-config 约束（默认 true=受控） | ✅ 同样受约束，但 `"Remote Communication Kit"` 默认 **false=不受控**（API 23 起可置 true） | ✅ 受 `"Network Kit"` 组件配置约束（底层是 net.http） |
+| 网络安全配置: trust-anchors | ✅ 遵循 network_config.json 应用级信任锚点（base+domain 都需配置） | ❌ **完全不遵循**；缺省与显式 `remoteValidation: 'system'` 都失败（1007900060），只能用代码级 `remoteValidation` | ✅ 遵循（跟随 net.http，同 Network Kit） |
+| 网络安全配置: 明文控制 | ✅ 受 component-config 约束（默认 true=受控） | ⚠️ 全局 `cleartextTrafficPermitted: false` **拦不住 RCP**（实测仍 200）；只有 `component-config."Remote Communication Kit": true` 才受控（否则 1007900201） | ✅ 受 `"Network Kit"` 组件配置约束（底层是 net.http） |
 | 协议/缓存/连接可观测性 | ✅ `connectionExtraInfo`（协议名、isCacheHit） | ✅ `httpVersion` / `cacheInfo` | ❌ 仅 `performanceTiming`，**不暴露协议版本/isCacheHit/cookies** |
 | 自动 JSON 解析 | ❌ 手动 `JSON.parse` | ⚠️ `toJSON()` | ✅ 默认自动（`forcedJSONParsing`） |
 
@@ -184,11 +184,16 @@ devecocli emulator list / start "Pura 90"
 1. 启动 mock server：`cd mock-server && npm start`（可用 `curl` 自测端点）。
 2. `cd network-compare && devecocli build`。
 3. `devecocli run --device "Pura 90"` 部署启动。
-4. UI 自动化验证（无头操作）：用 `hdc` 的 `uitest dumpLayout` 取按钮 bounds →
-   `uitest uiInput click <x> <y>` 点击 → `uitest uiInput swipe ...` 滚动。
-   ⚠️ 结果区出现后**布局会下移**，按钮坐标会变，需重新 dumpLayout 取最新坐标
-   （完整命令见 `network-compare/AGENTS.md`）。
-5. 结合 mock server 的 `[req] ...` 请求日志与服务端计数端点验证客户端行为。
+4. **优先用自检按钮（推荐）**：点 UI 顶部「自检 NSC × RCP 组（结果写 hilog）」按钮，
+   一次跑完 6 个安全配置场景 × 三框架并写 hilog，然后
+   `devecocli log --device "Pura 90" --bundle-name com.example.networkcompare --keyword NSCTEST --from 5m --tail 100`。
+   ⚠️ **不要与其它 hdc/uitest 命令并行**（两个 uitest 会话会互相阻塞）。
+5. 其它场景用 UI 自动化：`uitest dumpLayout` 取按钮 bounds → `uitest uiInput click <x> <y>`
+   → `uitest uiInput swipe ...` 滚动。⚠️ 结果区出现后**布局会下移**，坐标会变，
+   需重新 dumpLayout 取最新坐标（完整命令见 `network-compare/AGENTS.md`）。
+6. 结合 mock server 的 `[req] ...` 请求日志与服务端计数端点验证客户端行为。
+7. **NSC（安全配置）相关实验**：配置随 HAP 打包，改配置必须重新构建+重装；
+   实验后务必 `git checkout --` 还原（变体矩阵见 `network-compare/AGENTS.md`）。
 
 ## 代码风格（全仓库）
 

@@ -37,8 +37,18 @@ devecocli run --device "Pura 90"                 # 构建+安装+启动（debug 
 | 7 | Cache + ETag (304) | 是否发送 If-None-Match 并消费 304（axios 默认把 304 当错误） |
 | 8 | Multipart/form-data 上传 | 文本字段 + 二进制文件部分 |
 | 9 | 二进制上传 (octet-stream) | 4KB ArrayBuffer，服务端回显字节数与 sha256 |
-| 10 | 网络安全配置: trust-anchors | 无代码级 CA，验证应用级信任锚点是否生效 |
+| 10 | 网络安全配置: trust-anchors | 无代码级 CA，验证应用级信任锚点是否生效（RCP 实测不遵循） |
 | 11 | 网络安全配置: 明文权限 | 探测 component-config 明文管控是否生效 |
+| 12 | NSC × RCP: `remoteValidation='system'` | 显式系统 CA 库：证明 RCP 不读应用级 NSC trust-anchors |
+| 13 | NSC × RCP: 代码级 CA 覆盖默认 | `remoteValidation={content}` 覆盖默认 `'system'` |
+| 14 | NSC × RCP: `remoteValidation='skip'` | RCP 独有：绕过全部证书校验（Network Kit/Axios 为 N/A） |
+| 15 | NSC × RCP: `ValidationCallback` | RCP 独有：自定义校验完全替换默认信任逻辑 |
+
+> 场景 10–15 可一次跑完：点首页顶部 **「自检 NSC × RCP 组（结果写 hilog）」** 按钮，
+> 结果同时写入 hilog（关键字 `NSCTEST`），便于无头验证：
+> `devecocli log --device "Pura 90" --bundle-name com.example.networkcompare --keyword NSCTEST --from 5m --tail 100`
+> ⚠️ 这些场景依赖 `network_config.json`，改配置需重新构建部署；矩阵与变体实验见
+> [`AGENTS.md`](AGENTS.md) 与 [`../COMPARISON.md`](../COMPARISON.md)。
 
 ## 配置
 

@@ -549,4 +549,58 @@ export class NetKitScenarios {
       req.destroy();
     }
   }
+
+  // ---- NSC × RCP security-configuration relationship (mirrors) ----------------
+
+  /**
+   * NSC × RCP matrix — code-level caData control. Mirror of RcpScenarios.nscTrustCa:
+   * Network Kit's code-level CA overrides the default system store as well.
+   * Expected: 200.
+   */
+  static async nscTrustCa(): Promise<ScenarioResult> {
+    const req = http.createHttp();
+    try {
+      const options: http.HttpRequestOptions = {
+        method: http.RequestMethod.GET,
+        expectDataType: http.HttpDataType.STRING,
+        usingProtocol: http.HttpProtocol.HTTP2,
+        readTimeout: 15000,
+        connectTimeout: 15000,
+        header: { 'Accept': 'application/json' },
+        caData: AppConfig.MOCK_CA_PEM,
+      };
+      const resp = await req.request(`${AppConfig.httpsBase()}/api/protocol`, options);
+      const body = JSON.parse(String(resp.result)) as Record<string, string>;
+      const detail =
+        `HTTP status : ${resp.responseCode}\n` +
+        `server saw  : ${body['protocol']}\n` +
+        `note        : caData=MOCK_CA_PEM（代码级信任）`;
+      return new ScenarioResult(resp.responseCode === 200,
+        resp.responseCode === 200 ? '代码级 caData 生效（HTTPS OK）' : '代码级 caData 未生效', detail,
+        resp.responseCode);
+    } catch (e) {
+      const err = e as BusinessError;
+      return ScenarioResult.error('NetworkKit nsc-trust-ca', err as Error);
+    } finally {
+      req.destroy();
+    }
+  }
+
+  /**
+   * N/A placeholder: Network Kit (API 24) has no "skip certificate validation"
+   * option — RCP's remoteValidation='skip' has no counterpart here.
+   */
+  static async nscTrustSkip(): Promise<ScenarioResult> {
+    return new ScenarioResult(true, 'N/A — 无对应能力',
+      'Network Kit (API 24) 无跳过证书校验的选项；信任来源只有 caData/caPath + network_config.json trust-anchors。');
+  }
+
+  /**
+   * N/A placeholder: Network Kit (API 24) has no custom certificate validation
+   * callback — RCP's ValidationCallback has no counterpart here.
+   */
+  static async nscTrustCallback(): Promise<ScenarioResult> {
+    return new ScenarioResult(true, 'N/A — 无对应能力',
+      'Network Kit (API 24) 无自定义证书校验回调；对应能力仅存在于 RCP 的 remoteValidation=ValidationCallback。');
+  }
 }

@@ -149,14 +149,14 @@ Axios 实测全部 11 个场景通过（`AxiosScenarios.ets`），以下是它�
 
 **① trust-anchors（应用级信任 CA）**
 
-| 配置 | Network Kit | RCP |
-|------|-------------|-----|
-| 仅 base-config 配 trust-anchors | ❌ SSL 错误（被 domain-config 覆盖） | ❌ SSL 错误 |
-| base-config + domain-config 都配 | ✅ HTTPS 成功（无代码级 caData） | ❌ 仍报 SSL 错误 |
+| 配置 | Network Kit | RCP | Axios |
+|------|-------------|-----|-------|
+| 仅 base-config 配 trust-anchors | ❌ SSL 错误（被 domain-config 覆盖） | ❌ SSL 错误 | ❌ SSL 错误 |
+| base-config + domain-config 都配 | ✅ HTTPS 成功（无代码级 caData） | ❌ 仍报 SSL 错误 | ✅ HTTPS 成功（无代码级 caPath） |
 
 - **Network Kit 遵循 network_config.json 的应用级信任锚点**：base-config 与
   domain-config（`10.0.2.2`）都配置 `trust-anchors` 后，不带 `caData` 的 HTTPS 请求
-  成功（连接信息显示 HTTP/2）。
+  成功（连接信息显示 HTTP/2）。Axios 跟随 net.http，同样成功。
 - **RCP 不遵循应用级 trust-anchors**：同样的 network_config.json 下仍报
   `SSL peer certificate ... was not OK`。RCP 的 `remoteValidation: 'system'` 只信任
   系统/用户 CA，应用级 trust-anchors 必须通过代码级
@@ -166,18 +166,77 @@ Axios 实测全部 11 个场景通过（`AxiosScenarios.ets`），以下是它�
 
 **② cleartextTrafficPermitted / component-config（明文 HTTP 控制）**
 
-| 配置 | Network Kit | RCP |
-|------|-------------|-----|
-| 全局禁明文 + 组件受控 | ✅ 拦截：`Cleartext traffic not permitted` | ✅ 拦截：`Plaintext transmission is forbidden` |
-| 全局禁明文 + 组件不受控 | — | ✅ 明文仍可用（HTTP 200） |
+| NSC 状态（网络配置） | Network Kit | RCP | Axios |
+|------|-------------|-----|-------|
+| `cleartextTrafficPermitted: true`，组件开关均 true（**当前提交版**） | ✅ 200 | ✅ 200 | ✅ 200 |
+| `cleartextTrafficPermitted: false` + RCP 组件开关 **false** | ❌ 2300997 `Cleartext traffic not permitted` | **✅ 200（仍可明文）** | ❌ 2300997 |
+| `cleartextTrafficPermitted: false` + RCP 组件开关 **true** | ❌ 2300997 | ❌ 1007900201 `Plaintext transmission is forbidden` | ❌ 2300997 |
 
-- 两框架**都受** `component-config` 明文控制，语义为"该组件是否受系统明文禁令约束"：
+- `component-config` 的语义是"该组件**是否受**系统明文禁令约束"：
   - `component-config."Network Kit"` 默认 **true**（受控）。
   - `component-config."Remote Communication Kit"` 默认 **false**（不受控，API 23 起
     支持配置）；设为 true 后与 Network Kit 行为一致。
-- 即：默认配置下全局禁明文时，Network Kit 会被拦截而 RCP 不受影响；这是迁移到 RCP
-  时**需要显式配置** `component-config."Remote Communication Kit": true` 才能获得同等
-  明文管控的关键差异。
+- 即：全局禁明文时，Network Kit（与 Axios）被拦截，而 RCP **不受全局开关影响**——
+  只有把组件开关显式置 true，RCP 才被纳入管控。迁移到 RCP 时若需要同等明文管控，
+  **必须**显式配置 `component-config."Remote Communication Kit": true`。
+
+### RCP SecurityConfiguration × 系统 NSC：遵循程度与优先级（专项实测）
+
+`SecurityConfiguration`（RCP 自身的安全配置）与系统 NSC（`network_config.json`）
+各管什么、谁优先，通过 6 个场景 × 3 框架的自检矩阵实测
+（`Index.ets` 的「自检 NSC × RCP 组」按钮，结果写 hilog，关键字 `NSCTEST`）。
+
+**A. 信任（TLS 对端校验）矩阵**
+
+| 场景（本构建：NSC 已配 trust-anchors=mock CA） | Network Kit | RCP | Axios |
+|---|---|---|---|
+| `nscTrust`：不带代码级 CA，纯靠 NSC | ✅ 200 | ❌ 失败 `SSL peer certificate ... was not OK` | ✅ 200 |
+| `nscTrustSystem`：RCP 显式 `remoteValidation: 'system'` | ✅ 200（无对应写法，等价于上一行） | ❌ **1007900060** | ✅ 200 |
+| `nscTrustCa`：代码级 CA（`caData` / `remoteValidation.content` / `caPath`） | ✅ 200 | ✅ 200 | ✅ 200 |
+| `nscTrustSkip`：`remoteValidation: 'skip'` | N/A（无此能力） | ✅ 200（绕过全部校验） | N/A |
+| `nscTrustCallback`：`remoteValidation: ValidationCallback` | N/A（无此能力） | ❌ 1007900060（本例回调只认系统 CA 库） | N/A |
+
+**结论（信任维度：RCP 自身配置优先，且是唯一生效者）**
+
+1. **RCP 完全不读应用级 NSC trust-anchors**：NSC 已把 mock CA 配为信任锚点，
+   Network Kit/Axios 因此无需代码级 CA 即可成功，而 RCP 用**缺省值**和**显式
+   `'system'`** 两种写法都失败（`1007900060 SSL peer certificate or SSH remote key
+   was not OK`）。→ 两者不构成"冲突"，而是 NSC 对 RCP **零作用**。
+2. `remoteValidation` 的缺省值就是 `'system'`（见 `@hms.collaboration.rcp.d.ts`：
+   "Default is 'system'"），语义是**设备系统 CA 库**，与应用级 trust-anchors 无关。
+3. RCP 的信任来源只能来自自身 `SecurityConfiguration`：
+   `{content|filePath|folderPath}`（代码级 CA，实测 200）、`'skip'`（全放行，实测 200）、
+   `ValidationCallback`（自定义，实测按其逻辑拒绝并返回 1007900060）。
+   → 要在 RCP 上复刻 NSC trust-anchors 行为，只能自己写 callback
+   （官方示例即用 `networkSecurity.certVerificationSync` 自行校验）。
+4. ⚠️ **`certVerificationSync` 对自签/不受信证书会抛异常**（而非返回非 0），
+   callback 里必须 try/catch 并映射为"拒绝"。
+
+**结论（明文维度：没有"两种 config"之争，NSC 内部按组件粒度生效）**
+
+- RCP 的 `SecurityConfiguration` **没有任何明文字段**（其字段为
+  `remoteValidation` / `certificate` / `tlsOptions` / `serverAuthentication` /
+  `certificatePinning` / `tlsRange`），因此明文控制**只能**由 NSC 决定。
+- NSC 内部的优先级是 **组件开关 > 全局开关**：
+  `cleartextTrafficPermitted: false` 只对"受控"组件生效，RCP 在
+  `component-config."Remote Communication Kit": false`（默认）时**不受全局禁令约束**，
+  置 true 后才被拦截（1007900201）。
+- 即：**明文看 NSC（组件开关），信任看 RCP 自身配置**。
+
+**复现方式**
+
+```bash
+# 1) 当前构建：点「自检 NSC × RCP 组（结果写 hilog）」按钮（UI 顶部固定位置），
+#    或直接看 hilog：
+devecocli log --device "Pura 90" --bundle-name com.example.networkcompare \
+  --keyword NSCTEST --from 5m --tail 100 | grep NSCTEST
+
+# 2) 明文变体（NSC 随 HAP 打包，必须改配置→重新构建→重装）：
+#    V1: cleartextTrafficPermitted=false(base+domain) + "Remote Communication Kit": false
+#    V2: 同上，但 "Remote Communication Kit": true
+#    改完 build + run --skip-build --uninstall，再跑上面的自检。
+#    （实测：V1 只拦 Network Kit/Axios；V2 三方全拦）
+```
 
 ## Cangjie 语言视角：RCP 无 Cangjie 绑定，仅 Network Kit 可用
 

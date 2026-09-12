@@ -14,6 +14,13 @@ import { AxiosScenarios } from '../axios/AxiosScenarios';
 
 const TAG = 'NetCompare';
 
+/**
+ * Scenario keys covered by the headless NSCTEST self-test — the
+ * "NSC × RCP security configuration" group plus the two original NSC cards.
+ */
+const SELF_TEST_KEYS: string[] = ['nscTrust', 'nscCleartext', 'nscTrustSystem',
+  'nscTrustCa', 'nscTrustSkip', 'nscTrustCallback'];
+
 interface ScenarioDef {
   key: string;
   title: string;
@@ -134,6 +141,38 @@ struct Index {
         rcp: RcpScenarios.nscCleartext,
         axios: AxiosScenarios.nscCleartext,
       },
+      {
+        key: 'nscTrustSystem',
+        title: 'NSC × RCP 信任优先级: remoteValidation=\'system\'',
+        desc: 'RCP 显式指定 \'system\'（也是缺省值，= 设备系统 CA 库）；Network Kit/Axios 不带代码级 CA（走 NSC trust-anchors）。network_config.json 已把 mock CA 配为 trust-anchor，对比三方是否采信——以此判定"两种 config 谁优先"。',
+        netKit: NetKitScenarios.nscTrustAnchors,
+        rcp: RcpScenarios.nscTrustSystem,
+        axios: AxiosScenarios.nscTrustAnchors,
+      },
+      {
+        key: 'nscTrustCa',
+        title: 'NSC × RCP 信任优先级: 代码级 CA 覆盖默认',
+        desc: 'RCP remoteValidation={content} / Network Kit caData / axios caPath 显式信任 mock CA，验证代码级信任是否覆盖默认 system（也即是否独立于 NSC）。',
+        netKit: NetKitScenarios.nscTrustCa,
+        rcp: RcpScenarios.nscTrustCa,
+        axios: () => AxiosScenarios.nscTrustCa(this.filesDir),
+      },
+      {
+        key: 'nscTrustSkip',
+        title: 'NSC × RCP: remoteValidation=\'skip\' 绕过全部校验',
+        desc: 'RCP 独有能力：跳过全部证书校验（自签证书直接通过）。Network Kit/Axios 无对应选项（N/A）。',
+        netKit: NetKitScenarios.nscTrustSkip,
+        rcp: RcpScenarios.nscTrustSkip,
+        axios: AxiosScenarios.nscTrustSkip,
+      },
+      {
+        key: 'nscTrustCallback',
+        title: 'NSC × RCP: ValidationCallback 自定义校验',
+        desc: 'RCP 独有能力：自定义证书校验回调完全替换默认信任逻辑。本例回调用 networkSecurity.certVerificationSync 只认系统 CA 库（自签证书将失败）——证明 callback 是 RCP 复刻 NSC 语义的唯一手段。Network Kit/Axios 无对应选项（N/A）。',
+        netKit: NetKitScenarios.nscTrustCallback,
+        rcp: RcpScenarios.nscTrustCallback,
+        axios: AxiosScenarios.nscTrustCallback,
+      },
     ];
   }
 
@@ -179,6 +218,51 @@ struct Index {
     }
   }
 
+  /**
+   * Run the NSC × RCP group in one go and log every result to hilog
+   * (TAG=NetCompare, keyword NSCTEST). This makes the matrix verifiable
+   * headlessly — read it with:
+   *   devecocli log --device "Pura 90" --bundle-name com.example.networkcompare --keyword NSCTEST
+   * The normal on-screen result slots are filled at the same time.
+   */
+  private async runSelfTest(): Promise<void> {
+    this.busy = this.copyWith(this.busy, 'selftest', true);
+    const defs = this.scenarios();
+    for (let i = 0; i < defs.length; i++) {
+      const s = defs[i];
+      if (!SELF_TEST_KEYS.includes(s.key)) {
+        continue;
+      }
+      await this.selfTestOne(s.key, 'netkit', s.netKit);
+      await this.selfTestOne(s.key, 'rcp', s.rcp);
+      await this.selfTestOne(s.key, 'axios', s.axios);
+    }
+    this.busy = this.copyWith(this.busy, 'selftest', false);
+    hilog.info(0x0000, TAG, 'NSCTEST group done');
+  }
+
+  /** Run one scenario, log a single NSCTEST line, and fill its UI slot. */
+  private async selfTestOne(key: string, runner: string,
+                            fn: () => Promise<ScenarioResult>): Promise<void> {
+    let line: string = '';
+    try {
+      const r = await fn();
+      line = `${r.ok ? 'OK' : 'FAIL'} status=${r.statusCode} | ${r.summary}`;
+      const text = `${r.ok ? '[OK]' : '[FAIL]'} ${r.summary}\n${r.detail}`;
+      if (runner === 'netkit') {
+        this.netKitResults = this.copyWith(this.netKitResults, key, text);
+      } else if (runner === 'rcp') {
+        this.rcpResults = this.copyWith(this.rcpResults, key, text);
+      } else {
+        this.axiosResults = this.copyWith(this.axiosResults, key, text);
+      }
+    } catch (e) {
+      const err = e as Error;
+      line = `EXC | ${err.message ?? e}`;
+    }
+    hilog.info(0x0000, TAG, 'NSCTEST %{public}s %{public}s %{public}s', key, runner, line);
+  }
+
   /** Immutable-style update: returns a new record so @State re-renders. */
   private copyWith<T>(src: Record<string, T>, key: string, value: T): Record<string, T> {
     const next: Record<string, T> = {};
@@ -207,6 +291,17 @@ struct Index {
         Button('应用').onClick(() => this.applyHost())
       }
       .width('100%')
+
+      // Headless verification helper: runs the NSC × RCP group and writes every
+      // result to hilog (keyword NSCTEST), so the matrix can be checked without
+      // scrolling through every card by hand.
+      Button(this.busy['selftest'] ? '自检运行中 …' : '自检 NSC × RCP 组（结果写 hilog）')
+        .width('100%')
+        .backgroundColor('#FF6B00')
+        .enabled(!this.busy['selftest'])
+        .onClick(() => {
+          this.runSelfTest();
+        })
 
       // Scenario cards
       List({ space: 12 }) {

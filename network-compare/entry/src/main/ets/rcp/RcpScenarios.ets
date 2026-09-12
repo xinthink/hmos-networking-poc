@@ -6,6 +6,7 @@
  * (ALPN); there is no explicit protocol switch below API 26.
  */
 import { rcp } from '@kit.RemoteCommunicationKit';
+import { networkSecurity } from '@kit.NetworkKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { AppConfig } from '../common/AppConfig';
 import { ScenarioResult } from '../model/ScenarioResult';
@@ -401,6 +402,177 @@ export class RcpScenarios {
     } catch (e) {
       const err = e as BusinessError;
       return ScenarioResult.error('RCP nsc-cleartext', err as Error);
+    } finally {
+      session.close();
+    }
+  }
+
+  // ---- NSC × RCP security-configuration relationship --------------------------
+  //
+  // Which config wins when RCP's own SecurityConfiguration meets the system
+  // Network Security Configuration (network_config.json)?
+  //  - trust:  RCP reads ONLY its own remoteValidation. The default is 'system'
+  //            (= device system CA store), and the app-level NSC trust-anchors
+  //            are never consulted. -> RCP security config wins (is the only one).
+  //  - plaintext: SecurityConfiguration has NO cleartext switch at all, so the
+  //            NSC component-config flag is the only lever -> NSC wins.
+
+  /**
+   * Session with explicit remoteValidation='system' (device CA store).
+   * 'system' is also the default when remoteValidation is unset (per
+   * @hms.collaboration.rcp.d.ts); making it explicit removes any doubt that the
+   * default behavior is being compared, not a missing-configuration quirk.
+   */
+  private static newSystemExplicitSession(): rcp.Session {
+    const security: rcp.SecurityConfiguration = { remoteValidation: 'system' };
+    const config: rcp.Configuration = { security: security };
+    return rcp.createSession({ requestConfiguration: config });
+  }
+
+  /** Session with remoteValidation='skip' — bypasses every certificate check. */
+  private static newSkipSession(): rcp.Session {
+    const security: rcp.SecurityConfiguration = { remoteValidation: 'skip' };
+    const config: rcp.Configuration = { security: security };
+    return rcp.createSession({ requestConfiguration: config });
+  }
+
+  /**
+   * Session whose remoteValidation is a custom ValidationCallback that mimics
+   * "system CA store only" verification: the presented chain is checked against
+   * the system CA store via networkSecurity.certVerificationSync (app-level NSC
+   * trust-anchors are NOT consulted), and rejected otherwise. This is the only
+   * way to re-implement NSC-like semantics inside RCP.
+   */
+  private static newCallbackSession(): rcp.Session {
+    const cb: rcp.ValidationCallback = (context: rcp.ValidationContext): boolean => {
+      if (context.pemCerts.length === 0) {
+        return false;
+      }
+      const last: number = context.pemCerts.length - 1;
+      const blob: networkSecurity.CertBlob = {
+        type: networkSecurity.CertType.CERT_TYPE_PEM,
+        data: context.pemCerts[last],
+      };
+      try {
+        // Second arg omitted -> verify against the system CA store only.
+        // NOTE: for a self-signed / untrusted cert this THROWS (e.g. 2305018
+        // "Self-signed certificate") instead of returning non-zero, so the
+        // exception must be caught and mapped to "reject".
+        return networkSecurity.certVerificationSync(blob) === 0;
+      } catch (e) {
+        return false;
+      }
+    };
+    const security: rcp.SecurityConfiguration = { remoteValidation: cb };
+    const config: rcp.Configuration = { security: security };
+    return rcp.createSession({ requestConfiguration: config });
+  }
+
+  /**
+   * NSC × RCP trust priority — explicit remoteValidation='system'.
+   * network_config.json already declares the mock CA as a trust-anchor; if RCP
+   * consulted the app-level NSC, this would succeed. Expected: fail, proving
+   * RCP's own security config wins and NSC trust-anchors are ignored.
+   */
+  static async nscTrustSystem(): Promise<ScenarioResult> {
+    const session = RcpScenarios.newSystemExplicitSession();
+    try {
+      const resp = await session.get(`${AppConfig.httpsBase()}/api/protocol`);
+      const body = JSON.parse(resp.toString() ?? '{}') as Record<string, string>;
+      const detail =
+        `HTTP status : ${resp.statusCode}\n` +
+        `client HTTP : ${resp.httpVersion}\n` +
+        `note        : remoteValidation='system' (explicit); NSC trust-anchors configured but NOT consulted`;
+      return new ScenarioResult(resp.statusCode === 200,
+        resp.statusCode === 200 ? "'system' accepted (unexpected)" :
+          "'system' rejected: RCP 只认自身配置，NSC trust-anchors 被忽略", detail, resp.statusCode);
+    } catch (e) {
+      const err = e as BusinessError;
+      return new ScenarioResult(false,
+        "'system' rejected: RCP 只认自身配置，NSC trust-anchors 被忽略",
+        `RCP nsc-trust-system 失败\ncode=${err.code}\n${err.message}\n` +
+          `conclusion : trust 维度 RCP SecurityConfiguration 优先（唯一生效），NSC 无效`,
+        err.code);
+    } finally {
+      session.close();
+    }
+  }
+
+  /**
+   * NSC × RCP trust priority — code-level CertificateAuthority overrides the
+   * 'system' default. Expected: 200 (RCP's own config beats its own default,
+   * and therefore beats NSC as well).
+   */
+  static async nscTrustCa(): Promise<ScenarioResult> {
+    const session = RcpScenarios.newSession(); // remoteValidation = { content: MOCK_CA_PEM }
+    try {
+      const resp = await session.get(`${AppConfig.httpsBase()}/api/protocol`);
+      const body = JSON.parse(resp.toString() ?? '{}') as Record<string, string>;
+      const detail =
+        `HTTP status : ${resp.statusCode}\n` +
+        `client HTTP : ${resp.httpVersion}\n` +
+        `note        : remoteValidation={content:MOCK_CA_PEM} 覆盖默认 'system'`;
+      return new ScenarioResult(resp.statusCode === 200,
+        resp.statusCode === 200 ? '代码级 CA 生效（覆盖默认 system）' : '代码级 CA 未生效', detail,
+        resp.statusCode);
+    } catch (e) {
+      const err = e as BusinessError;
+      return ScenarioResult.error('RCP nsc-trust-ca', err as Error);
+    } finally {
+      session.close();
+    }
+  }
+
+  /**
+   * NSC × RCP — remoteValidation='skip' bypasses every trust check (RCP-only
+   * capability). Expected: 200 even though the mock CA is in no trust store.
+   */
+  static async nscTrustSkip(): Promise<ScenarioResult> {
+    const session = RcpScenarios.newSkipSession();
+    try {
+      const resp = await session.get(`${AppConfig.httpsBase()}/api/protocol`);
+      const body = JSON.parse(resp.toString() ?? '{}') as Record<string, string>;
+      const detail =
+        `HTTP status : ${resp.statusCode}\n` +
+        `client HTTP : ${resp.httpVersion}\n` +
+        `note        : remoteValidation='skip' —— 不查系统 CA、不查 NSC，全部放行（生产慎用）`;
+      return new ScenarioResult(resp.statusCode === 200,
+        resp.statusCode === 200 ? "'skip' 绕过全部校验（HTTPS OK）" : "'skip' 仍被拦截（意外）", detail,
+        resp.statusCode);
+    } catch (e) {
+      const err = e as BusinessError;
+      return ScenarioResult.error('RCP nsc-trust-skip', err as Error);
+    } finally {
+      session.close();
+    }
+  }
+
+  /**
+   * NSC × RCP — custom ValidationCallback completely replaces the trust logic
+   * (RCP-only capability). This callback verifies against the system CA store
+   * only, so the self-signed mock certificate is expected to FAIL — the same
+   * verdict 'system' gives, but now enforced by app code. Returning true
+   * unconditionally would instead accept everything (the 'skip' semantics).
+   */
+  static async nscTrustCallback(): Promise<ScenarioResult> {
+    const session = RcpScenarios.newCallbackSession();
+    try {
+      const resp = await session.get(`${AppConfig.httpsBase()}/api/protocol`);
+      const body = JSON.parse(resp.toString() ?? '{}') as Record<string, string>;
+      const detail =
+        `HTTP status : ${resp.statusCode}\n` +
+        `client HTTP : ${resp.httpVersion}\n` +
+        `note        : ValidationCallback 用 networkSecurity.certVerificationSync 只认系统 CA 库`;
+      return new ScenarioResult(resp.statusCode === 200,
+        resp.statusCode === 200 ? 'callback 放行（意外）' : 'callback 按系统 CA 库拒绝（自签证书不在系统库）',
+        detail, resp.statusCode);
+    } catch (e) {
+      const err = e as BusinessError;
+      return new ScenarioResult(false,
+        'callback 按系统 CA 库拒绝：自签证书不在系统 CA 库（与 \'system\' 判定一致，但由应用代码执行）',
+        `RCP nsc-trust-callback 失败\ncode=${err.code}\n${err.message}\n` +
+          `conclusion : callback 完全替换默认信任逻辑；它是 RCP 复刻 NSC 语义的唯一手段`,
+        err.code);
     } finally {
       session.close();
     }

@@ -110,13 +110,59 @@ devecocli log --device "Pura 90" --bundle-name com.example.networkcompare --from
 - 配置文件：`entry/src/main/resources/base/profile/network_config.json`；证书目录：
   `entry/src/main/resources/resfile/mock-ca/`（含 `cert.pem` 与 `openssl x509 -hash`
   命名的 `<hash>.0` 副本）。
-- 实测结论（详见 `../COMPARISON.md`）：
-  - **trust-anchors**：Network Kit 遵循（须 base-config **与** domain-config 都配置，
-    否则被 domain 覆盖）；**RCP 不遵循**应用级 trust-anchors，必须用代码级
-    `remoteValidation`。
-  - **component-config 明文控制**：两框架都受控；`"Network Kit"` 默认 true，
-    `"Remote Communication Kit"` 默认 **false**（API 23 起支持，置 true 后同 Network Kit）。
-  - 若改动本配置做对比实验，改完必须重新构建部署（配置随 HAP 打包）。
+- 实测结论（详见 `../COMPARISON.md`「RCP SecurityConfiguration × 系统 NSC」）：
+  - **trust-anchors**：Network Kit / axios 遵循（须 base-config **与** domain-config
+    都配置，否则被 domain 覆盖）；**RCP 完全不遵循**应用级 trust-anchors——缺省与
+    显式 `remoteValidation: 'system'` 都失败（`1007900060`），必须用代码级
+    `remoteValidation`（`{content|filePath|folderPath}` / `'skip'` / `ValidationCallback`）。
+  - **component-config 明文控制**：语义是"该组件**是否受**系统明文禁令约束"。
+    `"Network Kit"` 默认 true；`"Remote Communication Kit"` 默认 **false**（API 23 起可配）
+    → 全局 `cleartextTrafficPermitted: false` **只拦 Network Kit/axios**，RCP 不受影响；
+    置 true 后 RCP 才被拦（`1007900201 Plaintext transmission is forbidden`）。
+  - **优先级**：信任看 RCP 自身 `SecurityConfiguration`（NSC 零作用）；明文看 NSC
+    组件开关（RCP 无明文字段），且 **组件开关 > 全局开关**。
+  - ⚠️ 配置随 HAP 打包，**改动必须重新 build + 重装**（见下方"明文变体实验"）。
+- ⚠️ `RcpScenarios.newCallbackSession()` 用 `networkSecurity.certVerificationSync`
+  校验链——它对自签/不受信证书**抛异常**而非返回非 0，因此该处必须 try/catch 并映射为
+  "拒绝"，否则异常会穿透 RCP 的校验回调。
+
+### 无头验证：自检按钮 + NSCTEST 日志（推荐，别硬拖 UI）
+UI 顶部有一个 **「自检 NSC × RCP 组（结果写 hilog）」** 按钮：一次点击顺序跑完
+`SELF_TEST_KEYS`（`nscTrust`、`nscCleartext`、`nscTrustSystem`、`nscTrustCa`、
+`nscTrustSkip`、`nscTrustCallback`）× 三框架，并把每行结果写 hilog：
+
+```bash
+hdc -t 127.0.0.1:5555 shell "hilog -r"
+hdc -t 127.0.0.1:5555 shell "uitest uiInput click 660 652"     # 自检按钮中心（顶部固定位置）
+sleep 20
+devecocli log --device "Pura 90" --bundle-name com.example.networkcompare \
+  --keyword NSCTEST --from 5m --tail 100 | grep NSCTEST
+```
+
+输出形如 `NSCTEST nscTrustSystem rcp FAIL status=1007900060 | 'system' rejected: ...`。
+
+**为什么要有这个按钮**：`uitest dumpLayout` 在本 App 上一次往返约 2–5 秒，14 张卡片的
+列表需要反复滚动+重定位，逐卡点击极慢且会被"结果区下移"打乱坐标；自检按钮把
+"点 18 次 + 反复滚动"压缩成"点 1 次 + 读日志"。
+
+⚠️ **不要并行执行 hdc/uitest**：两个 `uitest` 会话会互相阻塞，导致双方都超时
+（本仓库踩过：驱动脚本与手工 dump 并行时全部任务报 CARD NOT FOUND）。
+
+### 明文变体实验（build-variant，因为 NSC 随 HAP 打包）
+
+| 变体 | `cleartextTrafficPermitted`(base+domain) | `component-config."Remote Communication Kit"` | 实测结果 |
+|---|---|---|---|
+| 提交版 | true | true | 三方明文都 200 |
+| V1 | false | false | 只有 RCP 200；Network Kit/axios 报 2300997 |
+| V2 | false | true | 三方全拦；RCP 报 1007900201 |
+
+流程：改 JSON → `devecocli build` → `devecocli run --device "Pura 90" --skip-build --uninstall`
+→ 点自检 → 读 NSCTEST → **实验结束后 `git checkout -- <config>` 还原并重建**。
+
+### 场景卡片说明：RCP × NSC 组（4 张）
+`nscTrustSystem`（显式 `'system'`）、`nscTrustCa`（代码级 CA 覆盖默认）、
+`nscTrustSkip`、`nscTrustCallback`。后两张是 **RCP 独有能力**，Network Kit/axios 列返回
+`ScenarioResult(true, 'N/A — 无对应能力', ...)` 占位（不复用 `error()`，避免 UI 显示 [FAIL]）。
 
 ### 服务器可达性
 - 模拟器访问宿主机：`10.0.2.2`（`AppConfig.host` 默认值，UI 顶部可改）。

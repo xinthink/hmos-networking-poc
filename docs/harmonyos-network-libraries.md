@@ -30,9 +30,9 @@
 
 | 维度 | Network Kit (ArkTS) | Network Kit (Cangjie) | RCP | @ohos/axios | stdx.net.http |
 |---|---|---|---|---|---|
-| **归属** | OpenHarmony 开源子系统（`communication_netstack`） | 同上（Cangjie 绑定，`kit.NetworkKit` 重导出 `ohos.net.http`） | **HarmonyOS 闭源**（hms SDK，`Collaboration` 能力域） | 三方库（社区维护），**适配** Network Kit | Cangjie 官方扩展标准库（`cangjie_stdx`，开源） |
+| **归属** | OpenHarmony 开源子系统（`communication_netstack`） | 同上（OpenHarmony SDK `cangjie` 组件，仓 `interface_sdk_cangjie`；`kit.NetworkKit` 重导出 `ohos.net.http`） | **HarmonyOS 闭源**（hms SDK，`Collaboration` 能力域） | 三方库（社区维护），**适配** Network Kit | Cangjie 官方扩展标准库（`cangjie_stdx`，开源） |
 | **API 形态** | ArkTS，异步（Promise/Callback） | Cangjie，异步（`AsyncCallback`） | ArkTS（+ NDK C API `rcp.h`），异步 | ArkTS，Promise（axios 风格） | Cangjie，**同步阻塞** |
-| **平台** | 仅 HarmonyOS/OpenHarmony | 仅 HarmonyOS（Cangjie 目标） | **仅 HarmonyOS**（hms 闭源） | 仅 HarmonyOS | **跨平台**：Linux / macOS / Windows / OHOS |
+| **平台** | OpenHarmony 全系（HarmonyOS 及各类 OpenHarmony 发行版），受 syscap `SystemCapability.Communication.NetStack` 约束 | **同左**：OpenHarmony SDK 的 `cangjie` 组件（`interface_sdk_cangjie`，API 22+），运行时来自 `third_party_cangjie_runtime`；当前仅支持 **standard 设备**（实测在 HarmonyOS 模拟器完成） | **仅 HarmonyOS**（hms 闭源） | OpenHarmony 全系（随 net.http，受同一 syscap 约束） | **跨平台**：Linux / macOS / Windows / OHOS |
 | **底层实现** | netstack（应用进程内）+ netmanager 系统服务（策略） | 同 ArkTS 版（同一实现） | 闭源实现（应用进程内执行 HTTP/TLS，见 §4） | **调用 Network Kit**（`@ohos.net.http`） | 纯 Cangjie socket + TLS（OpenSSL dlopen） |
 | **Cookie** | 手动（`response.cookies` 为 Netscape 格式） | 手动（同上） | ✅ `CookieRepository` 自动 | 手动（不透出 cookies 字段） | ✅ 内置 `CookieJar`（默认启用） |
 | **Cache/ETag** | ⚠️ `usingCache` 实测未命中/不发 If-None-Match（另有显式 API `createHttpResponseCache()`，本仓库未覆盖） | 同 ArkTS 版 | ✅ `ResponseCache`（max-age 命中、304 复用） | ❌ 无缓存层 | ❌ 无缓存 |
@@ -120,7 +120,10 @@ graph TB
   进程）；系统服务进程（`SYS`）只提供**网络策略、权限校验、连接管理**等支撑能力，通过 IPC
   被调用——**不代理应用层 HTTP 报文**（实证见 §4/§5）。
 - **平台归属**：
-  - **Network Kit**（含 Cangjie 绑定）与 **Axios** 属于 OpenHarmony 开源栈，**仅 HarmonyOS**；
+  - **Network Kit**（含 Cangjie 绑定）与 **Axios** 属于 OpenHarmony 开源栈，**并非 HarmonyOS 专有**：
+    API 归属 OpenHarmony，实际可用性取决于发行版是否集成对应部件、设备是否具备
+    `SystemCapability.Communication.NetStack`（Cangjie 另需 OpenHarmony SDK 的 `cangjie`
+    组件 + 设备侧 Cangjie 运行时，且仅 standard 设备）——详见 §1 速览表与 §3.2「平台与交付」；
   - **RCP** 属华为闭源协作能力域（`Collaboration`），**仅 HarmonyOS**；
   - **stdx.net.http** 是 Cangjie 官方扩展库，**跨平台**（Linux/macOS/Windows/OHOS），
     在 OHOS 上通过 dlopen 系统 OpenSSL 实现 TLS——这也解释了它在本工程模拟器上
@@ -173,7 +176,17 @@ graph TB
 **定位**：Cangjie（仓颉）语言对 Network Kit 的**官方绑定**——`import kit.NetworkKit.*`
 实际重导出 `ohos.net.http.*`。Cangjie 应用做 HTTP 的**唯一系统级选择**（RCP 无 Cangjie 绑定）。
 
-**生态**：Cangjie API 24（Beta），绑定覆盖 HTTP 主要能力，但 API 面比 ArkTS 窄；
+**平台与交付**（不是 HarmonyOS 专有）：该绑定是 **OpenHarmony SDK 的 `cangjie` 组件**的
+一部分（源码仓 `openharmony/interface_sdk_cangjie`，声明文件 `api/NetworkKit/ohos.net.http.cj.d`，
+Apache-2.0）。其每个符号的 `@!APILevel` 与 ArkTS 版 Network Kit **完全一样**，只声明
+`syscap: "SystemCapability.Communication.NetStack"`（`since: "22"`），**没有任何 HarmonyOS
+专有标记**；设备侧运行时来自 `openharmony/third_party_cangjie_runtime`。因此真正的约束是
+**"standard 设备 + 集成 netstack + 集成 Cangjie 运行时"**，而非"仅 HarmonyOS"。
+开发机上它看起来像 Huawei 专供，是因为 DevEco 把 Cangjie 作为**独立 SDK 包**分发
+（`~/.cangjie-sdk/<ver>/cangjie`，含 `oh-uni-package.json`），而那正是该 OpenHarmony 仓
+文档描述的 `cangjie` 组件布局（证据见 §7「上游仓证据」）。
+
+**生态**：Cangjie API 22+（当前 SDK API 24，Beta），绑定覆盖 HTTP 主要能力，但 API 面比 ArkTS 窄；
 Cangjie 侧生态尚早（无 axios 类三方库）。
 
 **技术原理**：与 ArkTS 版**同一个 native 实现**（netstack），仅语言绑定不同。
@@ -247,6 +260,36 @@ NDK C API（`librcp_c.so` + `rcp.h`，API 12+）。**无 Cangjie 绑定**。
   也没有 `usingProtocol` 之类的入口——只能由框架自动协商，再用响应的
   `httpVersion` **读回**结果。需要"强制 HTTP/1.1 或 HTTP/2"时 RCP 无法满足
   （Network Kit 可显式 `usingProtocol`）
+
+#### SecurityConfiguration 与系统 NSC 的关系（专项实测）
+
+`SecurityConfiguration` 与系统 NSC（`network_config.json`）的**分工与优先级**，
+由 App 内 6 场景 × 3 框架自检矩阵实测（复现方式见文末证据一节）：
+
+| 维度 | 谁生效 | 优先级结论 |
+|---|---|---|
+| **TLS 信任** | **只有 RCP 自身 `SecurityConfiguration`** | NSC 的 `trust-anchors` 对 RCP **零作用**（不构成冲突，而是被完全忽略） |
+| **明文 HTTP** | **只有 NSC** | RCP 的 `SecurityConfiguration` **没有明文字段**，明文完全由 NSC 决定；NSC 内部是 **组件开关 > 全局开关** |
+
+实测证据（`NSCTEST` 日志）：
+
+- 信任：本构建的 NSC 已把 mock CA 配为 `trust-anchors`，Network Kit/Axios **无需代码级
+  CA** 即 HTTPS 200；而 RCP 用**缺省值**与**显式 `'system'`** 都失败（`1007900060
+  SSL peer certificate or SSH remote key was not OK`）。→ `'system'`（也是缺省值，
+  见 d.ts "Default is 'system'"）指**设备系统 CA 库**，与应用级 trust-anchors 无关。
+- RCP 侧只有自身配置生效：`{content}`（实测 200）、`{filePath}`/`{folderPath}`（同类）、
+  `'skip'`（实测 200，绕过全部校验）、`ValidationCallback`（实测按其逻辑拒绝）。
+  ⚠️ 用 `networkSecurity.certVerificationSync` 写 callback 时注意：它对自签/不受信证书
+  **抛异常**（如 2305018）而非返回非 0，必须 try/catch 并映射为"拒绝"。
+- 明文：`cleartextTrafficPermitted: false` 时 Network Kit/Axios 被拦（`2300997
+  Cleartext traffic not permitted`），而**组件开关为 false 的 RCP 仍明文 200**；
+  把 `"Remote Communication Kit"` 置 true 后 RCP 才被拦（`1007900201 Plaintext
+  transmission is forbidden`）。
+
+> 迁移含义：**Network Kit 换成 RCP 时，NSC 里的 `trust-anchors` 不会跟着生效**，
+> 必须在代码里重新配置信任（否则自签/内网 CA 场景直接失败）；反之若依赖全局禁明文
+> 做安全兜底，**必须显式打开** `component-config."Remote Communication Kit": true`，
+> 否则 RCP 会变成绕过明文管控的通道。
 
 ### 3.4 @ohos/axios
 
@@ -453,9 +496,27 @@ ArkTS 应用可采用 "RCP 主用 + Network Kit 处理需遵循 `network_config.
 | 结论 | 证据位置 |
 |---|---|
 | 三框架 11 场景对比矩阵、关键差异 | `COMPARISON.md`（含 RCP/Axios 实测表格） |
+| RCP `SecurityConfiguration` × 系统 NSC 的优先级矩阵（信任/明文） | `COMPARISON.md`「RCP SecurityConfiguration × 系统 NSC」；App 内「自检 NSC × RCP 组」按钮 + `NSCTEST` hilog |
 | Cangjie 版 Network Kit 11 场景 + stdx.net.http 11 场景 | `cj-network-compare/`（`README.md`/`AGENTS.md` + 模拟器实测） |
 | 缓存/ETag 的客观判据（服务端计数 delta） | `mock-server/server.mjs` 的 `/api/cache/stats`、`/api/cache/etag/stats` |
 | stdx 集成与 cjpm 依赖验证 | `cj-network-compare/AGENTS.md`、`COMPARISON.md`「stdx 依赖管理方式调研」 |
+
+**NSC × RCP 矩阵的复现命令**：
+
+```bash
+# 点一次自检按钮（UI 顶部固定位置 y≈652），跑完 6 场景 × 3 框架
+hdc -t 127.0.0.1:5555 shell "hilog -r"
+hdc -t 127.0.0.1:5555 shell "uitest uiInput click 660 652"
+sleep 20
+devecocli log --device "Pura 90" --bundle-name com.example.networkcompare \
+  --keyword NSCTEST --from 5m --tail 100 | grep NSCTEST
+
+# 明文优先级需要 build-variant（NSC 随 HAP 打包）：
+#   提交版: cleartextTrafficPermitted=true,  RCP 组件开关=true  -> 三方均 200
+#   V1    : cleartextTrafficPermitted=false, RCP 组件开关=false -> 仅 RCP 200
+#   V2    : cleartextTrafficPermitted=false, RCP 组件开关=true  -> 三方全拦
+# 变体流程见 network-compare/AGENTS.md；实验后 git checkout -- 还原并重建
+```
 
 ### 本次新增的进程级实证（HarmonyOS 6.1.1 模拟器 `Pura 90` + network-compare）
 
@@ -520,10 +581,10 @@ $HDC shell "hilog -x" | grep NetMgrEnhanced
 
 SDK 里 `ohos.net.http` 的接口元数据是编译产物（`.cjo`），直接 `strings` 容易误判
 （例如 `caData` 虽在元数据中出现，调用方却用不了）。**可靠做法是让 OHOS 目标编译器
-直接拒绝**。HarmonyOS 的 Cangjie SDK 自带交叉编译工具链，无需 hvigor：
+直接拒绝**。Cangjie SDK（OpenHarmony SDK 的 `cangjie` 组件）自带 OHOS 交叉编译工具链，无需 hvigor：
 
 ```bash
-CJ=/Users/ywu/.cangjie-sdk/6.1/cangjie          # 华为 HarmonyOS Cangjie SDK（api + build-tools）
+CJ=/Users/ywu/.cangjie-sdk/6.1/cangjie          # OpenHarmony SDK 的 cangjie 组件（Huawei 分发；api + build-tools）
 export CANGJIE_HOME=$CJ/build-tools
 export CANGJIE_PATH=$CJ/api/lib/linux_ohos_aarch64_cjnative
 
@@ -602,6 +663,42 @@ grep -n "config.caPath\|config.usingProtocol\|usingCache" $A/adapters/ohos/index
 # 4) Axios 接口没有 patch()，只有 patchForm()
 grep -nE "^\s+(patch|patchForm|postForm|putForm)<" $A/../index.d.ts
 ```
+
+### 上游仓证据（修正 Cangjie 绑定的平台归属）
+
+用于修正「Network Kit (Cangjie) 仅 HarmonyOS」的早期说法——该绑定是 **OpenHarmony SDK 组件**：
+
+```bash
+# 1) Cangjie API 声明仓（openharmony 组织，Apache-2.0）
+curl -sL https://raw.gitcode.com/openharmony/interface_sdk_cangjie/raw/master/README_zh.md | head -20
+#   "支撑 OpenHarmony SDK 中仓颉API的构建"
+#   "OpenHarmony SDK 由 js、ets、native、toolchains、previewer 以及 cangjie 六个部分组成"
+#   "当前仓颉接口仅支持 standard 设备"
+
+# 2) Network Kit 的 Cangjie 声明：111 处 @!APILevel 全部只声明 NetStack syscap（since 22）
+curl -sL https://raw.gitcode.com/openharmony/interface_sdk_cangjie/raw/master/api/NetworkKit/ohos.net.http.cj.d \
+  | grep -c 'SystemCapability.Communication.NetStack'                 # 111（= @!APILevel 块数）
+curl -sL https://raw.gitcode.com/openharmony/interface_sdk_cangjie/raw/master/api/NetworkKit/ohos.net.http.cj.d \
+  | grep -oE 'syscap: "[^"]+"' | sort -u
+#   syscap: "SystemCapability.Communication.NetStack"                 ← 唯一值，无 HarmonyOS 专有标记
+
+# 3) ArkTS 声明使用同一 syscap（两者无差异）
+curl -sL https://raw.gitcode.com/openharmony/interface_sdk-js/raw/master/api/@ohos.net.http.d.ts \
+  | grep -m1 'SystemCapability'
+#   * @syscap SystemCapability.Communication.NetStack
+```
+
+| 上游仓（均在 `openharmony` 组织） | 作用 |
+|---|---|
+| `interface_sdk_cangjie` | 仓颉 API 声明 + SDK 构建工具，产出 OpenHarmony SDK 的 `cangjie` 组件 |
+| `third_party_cangjie_runtime` | 基于 OpenHarmony 的仓颉运行时与标准库（设备侧） |
+| `arkcompiler_cangjie_ark_interop` | 仓颉-ArkTS 互操作宏 |
+| `arkui_arkui_cangjie_wrapper` | ArkUI 的仓颉封装（状态管理宏） |
+
+> ⚠️ **API 归属（OpenHarmony 开源）≠ 发行渠道**：开发机上 Cangjie 由 DevEco 的独立 SDK 包提供
+> （`~/.cangjie-sdk/<ver>/cangjie`，由 `cangjie-mgmt-plugin` 管理），且 DevEco
+> `sdk/default`（HarmonyOS 6.1.1）只含 `openharmony` + `hms` 两个组件目录——这一
+> 「看起来像 Huawei 专供」的观感，正是本文档早期把 Cangjie 绑定误标为「仅 HarmonyOS」的来源。
 
 ### SDK 逆向证据（DevEco Studio SDK）
 

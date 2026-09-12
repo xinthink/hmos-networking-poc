@@ -425,6 +425,56 @@ export class AxiosScenarios {
     }
   }
 
+  // ---- NSC × RCP security-configuration relationship (mirrors) ----------------
+
+  /**
+   * NSC × RCP matrix — code-level caPath control. Mirror of RcpScenarios.nscTrustCa:
+   * axios passes caPath down to net.http, so the code-level CA overrides the
+   * default system store just like Network Kit. Expected: 200.
+   */
+  static async nscTrustCa(filesDir: string): Promise<ScenarioResult> {
+    try {
+      const ca = await AxiosScenarios.ensureCaFile(filesDir);
+      const config: AxiosRequestConfig = {
+        method: 'GET',
+        usingProtocol: http.HttpProtocol.HTTP2,
+        readTimeout: 15000,
+        connectTimeout: 15000,
+        caPath: ca,
+        headers: { 'Accept': 'application/json' },
+      };
+      const resp = await axios.get<Record<string, string>, AxiosJsonResp, null>(`${AppConfig.httpsBase()}/api/protocol`, config);
+      const body = resp.data;
+      const detail =
+        `HTTP status : ${resp.status}\n` +
+        `server saw  : ${body['protocol']}\n` +
+        `note        : caPath=${ca}（代码级信任，随 net.http 生效）`;
+      return new ScenarioResult(resp.status === 200,
+        resp.status === 200 ? '代码级 caPath 生效（HTTPS OK）' : '代码级 caPath 未生效', detail, resp.status);
+    } catch (e) {
+      const err = e as AxiosJsonErr;
+      return AxiosScenarios.err('Axios nsc-trust-ca', err);
+    }
+  }
+
+  /**
+   * N/A placeholder: axios (via net.http) has no "skip certificate validation"
+   * option — RCP's remoteValidation='skip' has no counterpart here.
+   */
+  static async nscTrustSkip(): Promise<ScenarioResult> {
+    return new ScenarioResult(true, 'N/A — 无对应能力',
+      'axios 底层是 net.http（API 24），无跳过证书校验的选项；对应能力仅存在于 RCP 的 remoteValidation=\'skip\'。');
+  }
+
+  /**
+   * N/A placeholder: axios (via net.http) has no custom certificate validation
+   * callback — RCP's ValidationCallback has no counterpart here.
+   */
+  static async nscTrustCallback(): Promise<ScenarioResult> {
+    return new ScenarioResult(true, 'N/A — 无对应能力',
+      'axios 底层是 net.http（API 24），无自定义证书校验回调；对应能力仅存在于 RCP 的 remoteValidation=ValidationCallback。');
+  }
+
   // ---- helpers --------------------------------------------------------------
 
   /** Common base config: GET, 15s timeouts, Accept JSON. */
