@@ -113,7 +113,10 @@ devecocli emulator list / start "Pura 90"
 
 > ⚠️ **多个目标同时在连时（模拟器 + 真机），所有 `hdc` 命令都要带 `-t <serial>`**；
 > 裸 `hdc shell` 会报 `ExecuteCommand need connect-key` 并**静默导致自动化不生效**。
-> 真机（HUAWEI Pocket 2）验证的前置与步骤见 `network-compare/NSC-VERIFICATION.md` §11。
+> **真机（HUAWEI Pocket 2）需要华为签发的调试 profile**：用 DevEco 的
+> `File ▸ Project Structure ▸ Signing Configs ▸ 自动签名` 一次配好（会往
+> `network-compare/build-profile.json5` 写入本机相关配置，**提交前请还原该文件**）；
+> 真机验证已完成，结论见 `network-compare/NSC-VERIFICATION.md` §11。
 
 ## 跨工程约定（改代码时保持同步）
 
@@ -164,11 +167,12 @@ devecocli emulator list / start "Pura 90"
 > **遵守收紧性开关**（`component-config` 明文开关、`trust-*-user-ca` 用户 CA opt-out），
 > **忽略补充性配置**（`trust-anchors` app 级信任锚点、`pin-set` 静态证书锁定）。
 >
-> ⚠️ **NSC 相关几行的环境口径**（trust-anchors / pin-set / 用户 CA 三组结论）：实测环境是
-> **OpenHarmony 6.1.1(24) 模拟器镜像**、`domain-config` 用 **IP** 匹配、CA 目录同时含
-> `cert.pem` 与 `<hash>.0`。官方文档称 RCP 也可通过 `network_config.json` 配置 CA，
-> 与之冲突；**真机复测 / 主机名域匹配 / CA 目录形态**三项待验证，清单见
-> `network-compare/NSC-VERIFICATION.md` §10。
+> ✅ **NSC 相关几行已在真机复测（2026-09）**：HUAWEI Pocket 2（LEM-AL00，华为 6.1.0.135，
+> API 24）上 42 行结果与模拟器**逐行一致**；**主机名（`localhost`）与 IP（`10.0.2.2` /
+> `127.0.0.1`）两种域匹配方式结论也相同**。→ 官方文档称"RCP 也读 `network_config.json`"
+> 与实测的冲突**不能用"模拟器镜像不完整"或"RCP 只认主机名"来解释**，仍未定位。
+> 剩余待验证：CA 目录形态、真实 MITM 代理演示（清单见
+> `network-compare/NSC-VERIFICATION.md` §10）。
 
 ### Cangjie 版（cj-network-compare）补充结论
 

@@ -43,7 +43,11 @@ devecocli log --device "Pura 90" --bundle-name com.example.networkcompare --from
 > 报 `ExecuteCommand need connect-key`）。踩过：脚本因此静默不生效，误判"回归通过"。
 
 > 真机（HUAWEI Pocket 2）安装需要**华为签发的调试 profile**（本地 OpenHarmony 签名被拒
-> `9568257`）。完整前置与运行步骤见 [`NSC-VERIFICATION.md`](NSC-VERIFICATION.md) §11。
+> `9568257`）→ 用 DevEco `Project Structure ▸ Signing Configs ▸ 自动签名` 配一次即可。
+> ⚠️ 自动签名会**改写 `build-profile.json5`**（写入本机绝对路径与 keyPassword），
+> **提交前请 `git checkout -- build-profile.json5` 还原**，或提交时只 `git add` 明确文件。
+> 真机验证已完成、结果与模拟器逐行一致；完整步骤与坑见
+> [`NSC-VERIFICATION.md`](NSC-VERIFICATION.md) §11。
 
 ## 架构约定：如何新增一个对比场景
 
@@ -232,12 +236,11 @@ devecocli log --device "Pura 90" --bundle-name com.example.networkcompare \
 流程：改 JSON → `devecocli build` → `devecocli run --device "Pura 90" --skip-build --uninstall`
 → 点自检 → 读 NSCTEST → **实验结束后 `git checkout -- <config>` 还原并重建**。
 
-### 待验证事项（未做，勿当结论）
-`NSC-VERIFICATION.md` §10 列了四项待验证：**真机复测**（已就绪、**阻塞于华为签名要求**，
-见该文 §11）、
-**主机名域匹配**（我们用的是 IP `10.0.2.2`）、**真实 MITM 代理演示**（用户已明确留待以后）、
-**CA 目录形态**（同时放 `cert.pem` 与 `<hash>.0`）。
-在这些完成前，RCP 遵循度结论的环境口径应写成"OpenHarmony 6.1.1(24) 模拟器 + IP 域匹配 + 当前目录形态下"。
+### 待验证事项（见 `NSC-VERIFICATION.md` §10）
+✅ 已完成：**真机复测**（LEM-AL00 6.1.0.135，42 行与模拟器逐行一致）、
+**主机名 vs IP 域匹配**（`localhost` 与 `127.0.0.1` 结论相同）。
+⏳ 仍待验证：**真实 MITM 代理演示**（用户已明确留待以后）、**CA 目录形态**（同时放
+`cert.pem` 与 `<hash>.0`）。
 
 ### 跨系统版本复验（系统升级后手工做一次）
 完整流程与结果矩阵见 [`NSC-VERIFICATION.md`](NSC-VERIFICATION.md) §5/§7：

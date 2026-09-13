@@ -112,8 +112,8 @@
 
 ### Axios 实测要点（相对 Network Kit / RCP 的新差异）
 
-Axios 实测全部 11 个场景通过（`AxiosScenarios.ets`），以下是它相对两套官方框架
-**额外引入**的行为差异：
+Axios 实测 9 个常规场景全部通过（`AxiosScenarios.ets`；NSC 相关场景已移至
+`ets/nsc/NscAxios.ets`），以下是它相对两套官方框架**额外引入**的行为差异：
 
 1. **Header 大小写跟随 Network Kit（h1 全小写）**：虽然 AxiosHeaders 会保留开发者传入
    的 header 名大小写，但底层 net.http 在 HTTP/1.1 上仍统一转小写（实测服务端收到
@@ -183,8 +183,10 @@ Axios 实测全部 11 个场景通过（`AxiosScenarios.ets`），以下是它�
 ### RCP SecurityConfiguration × 系统 NSC：遵循程度与优先级（专项实测）
 
 `SecurityConfiguration`（RCP 自身的安全配置）与系统 NSC（`network_config.json`）
-各管什么、谁优先，通过 6 个场景 × 3 框架的自检矩阵实测
-（`Index.ets` 的「自检 NSC × RCP 组」按钮，结果写 hilog，关键字 `NSCTEST`）。
+各管什么、谁优先，通过 14 个场景 × 3 框架的自检矩阵实测
+（`Index.ets` 的「自检 NSC × RCP 组」按钮，结果写 hilog，关键字 `NSCTEST`；
+套件源码与完整矩阵见 [`network-compare/NSC-VERIFICATION.md`](network-compare/NSC-VERIFICATION.md)）。
+**本节的 RCP 列已在真机（HUAWEI Pocket 2 / LEM-AL00，6.1.0.135）复测，42 行逐行一致**。
 
 **A. 信任（TLS 对端校验）矩阵**
 
@@ -272,11 +274,15 @@ V7 用**一次构建**把两件事放进同一份 NSC：`cleartextTrafficPermitt
 | `pinSpki`（静态 pin 错、动态 pin 对） | ❌ 2300090 | ✅ **200**（不受 NSC pin-set 约束） |
 
 即：这份 NSC 在本构建中显然压得住 Network Kit/axios，而 RCP 的 anchors/pin-set 观测结果与
-"完全没有这些配置"的基线**逐行一致**。→ **RCP 对 NSC 的遵循度 = 只有明文组件开关这一项**。
+"完全没有这些配置"的基线**逐行一致**。→ 对**信任锚点与静态 pin** 这两类补充性配置，
+RCP 的遵循度为零（另见 ⑤：RCP **会**遵守"拒绝用户 CA"这类收紧性开关）。
 
-⚠️ 边界：以上结论的环境是 **OpenHarmony 6.1.1(24) 模拟器镜像**、`domain-config` 用 **IP** 匹配、
-CA 目录同时含 `cert.pem` 与 `<hash>.0`。官方文档称 RCP 也可通过 `network_config.json` 配置 CA，
-与本实测冲突——**真机复测、主机名域匹配、CA 目录形态**三项待验证，清单见
+⚠️ 边界（真机复测后已收窄）：以上结论原本只在 **OpenHarmony 6.1.1(24) 模拟器镜像**上成立
+（`domain-config` 用 IP 匹配、CA 目录同时含 `cert.pem` 与 `<hash>.0`）。**真机复测与主机名域匹配
+两项已完成**：HUAWEI Pocket 2（LEM-AL00，华为 6.1.0.135，API 24）上 42 行结果与模拟器**逐行一致**，
+host 换成主机名 `localhost` 后结论也不变 → 官方文档"RCP 也读 `network_config.json`"与实测的
+冲突**不能用"模拟器镜像不完整"或"RCP 只认主机名"解释**，根因仍未定位。
+剩余待验证只有 **CA 目录形态**与真实 MITM 代理演示，清单见
 [`network-compare/NSC-VERIFICATION.md`](network-compare/NSC-VERIFICATION.md) §10。
 
 **⑤ 用户安装的 CA（中间人防护）——RCP 遵守 opt-out**
@@ -296,9 +302,11 @@ CA 目录同时含 `cert.pem` 与 `<hash>.0`。官方文档称 RCP 也可通过 
 - 这是 RCP **唯一**遵守的 NSC 信任类开关：`trust-anchors`、`pin-set` 均被忽略。
   规律：**RCP 遵守 NSC 中"收紧性"开关（禁用明文、拒绝用户 CA），忽略"补充性"配置
   （app 级信任锚点、静态 pin-set）**。
-- ⚠️ 两个坑：这两个 key 是 `network-security-config` 的**兄弟节点**（顶层）；本模拟器上
-  应用侧 `openInstallCertificateDialog` 返回 `29700004`，装 CA 必须走证书管理 UI
+- ⚠️ 两个坑：这两个 key 是 `network-security-config` 的**兄弟节点**（顶层）；应用侧
+  `openInstallCertificateDialog` 在**模拟器与真机上均**返回 `29700004`，装 CA 必须走证书管理 UI
   （完整路径见 `NSC-VERIFICATION.md` §6-G）。
+- ✅ **真机复测（2026-09）**：以上三阶段（未装 CA → 装 CA 缺省 → 装 CA + opt-out）在
+  HUAWEI Pocket 2 上逐行一致（见 `NSC-VERIFICATION.md` §11.3）。
 
 **复现方式**
 
@@ -313,7 +321,14 @@ devecocli log --device "Pura 90" --bundle-name com.example.networkcompare \
 #    V2: 同上，但 "Remote Communication Kit": true
 #    改完 build + run --skip-build --uninstall，再跑上面的自检。
 #    （实测：V1 只拦 Network Kit/Axios；V2 三方全拦）
+
+# 3) 真机复测（已完成，步骤可复用）：hdc rport 三端口 + 自动签名 →
+devecocli run --device "HUAWEI Pocket 2" --skip-build --uninstall
+#    完整 copy-paste 步骤与坑见 network-compare/NSC-VERIFICATION.md §11.5
 ```
+
+> ⚠️ 真机自动化别用 `uitest uiInput inputText` 改 host（会静默失败）：
+> 临时改 `AppConfig.host` 默认值再 build 更可靠（见 `NSC-VERIFICATION.md` §11.4）。
 
 ## Cangjie 语言视角：RCP 无 Cangjie 绑定，仅 Network Kit 可用
 
@@ -472,7 +487,11 @@ repo 分支/tag）"的调研结论（2026-08）：
    （DevEco 的 `.../native/build-tools/cmake/bin`），`build-stdx.sh` 已自动探测；
    hvigor 卡死需清 `~/.hvigor/daemon` + `project_caches`（见 cj-network-compare/AGENTS.md）。
 
-## 可行性结论（模拟器实测后更新）
+## 可行性结论（模拟器 + 真机实测后更新）
+
+> 结论基础：模拟器 Pura 90（OpenHarmony 6.1.1(24)）+ **真机 HUAWEI Pocket 2
+> （LEM-AL00，华为 6.1.0.135，API 24）**；NSC 相关 42 行在两端逐行一致，
+> 域匹配用 IP 或主机名结论相同（见 `network-compare/NSC-VERIFICATION.md` §5/§11）。
 
 - **可平滑替换**：REST 方法、HTTP/1.1/2 协议、Multipart、二进制上传等核心 HTTP
   能力，RCP 均覆盖且 API 更统一，实测全部通过。
@@ -485,6 +504,10 @@ repo 分支/tag）"的调研结论（2026-08）：
     `RcpScenarios.newSession()`）；axios 跟随 net.http，读 network_config.json。
   - 明文管控：RCP 的 `component-config."Remote Communication Kit"` 默认不受控，需要
     明文禁令时须显式置 true，否则全局禁明文只对 Network Kit（与 axios）生效。
+  - 用户安装的 CA（代理/MITM 防护）：三方默认都信任用户 CA；要拒绝必须配顶层
+    `trust-global-user-ca` / `trust-current-user-ca = false` —— **RCP 遵守这两个 key**
+    （否则设备上一装代理 CA，RCP 流量同样可被解密）。静态 `pin-set` 对 RCP 无效，
+    需要锁定证书请在代码里用 `certificatePinning`。
 - **Header 大小写**：若业务或服务端对 header 名大小写敏感（如某些网关做签名校验），
   从 Network Kit 迁到 RCP 后 HTTP/1.1 上的 header 名会从"全小写"变成"保留原大小写"，
   需确认服务端兼容；axios 与 Network Kit 一样全小写，无此变化。

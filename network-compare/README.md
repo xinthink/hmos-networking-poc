@@ -24,7 +24,15 @@ devecocli run --device "Pura 90"                 # 构建+安装+启动（debug 
 
 > `devecocli build/run` 需要写 `~/.hvigor`、`~/.ohpm`，请在本机终端执行。
 
+**真机（HUAWEI Pocket 2 等零售机）**：需要华为签发的调试 profile —— 用 DevEco 的
+`File ▸ Project Structure ▸ Signing Configs ▸ 自动签名` 配一次即可（会改写
+`build-profile.json5`，**提交前请还原**）；再用 `hdc -t <serial> rport` 做端口反向转发。
+完整步骤与坑见 [`NSC-VERIFICATION.md`](NSC-VERIFICATION.md) §11。真机验证已完成，
+NSC 42 行结果与模拟器逐行一致。
+
 ## 场景清单（App 首页逐张卡片，Network Kit / RCP / Axios 三列运行）
+
+常规场景 9 张（`netkit/` + `rcp/` + `axios/` 三个 runner 镜像实现）：
 
 | # | 场景 | 说明 |
 |---|------|------|
@@ -37,20 +45,30 @@ devecocli run --device "Pura 90"                 # 构建+安装+启动（debug 
 | 7 | Cache + ETag (304) | 是否发送 If-None-Match 并消费 304（axios 默认把 304 当错误） |
 | 8 | Multipart/form-data 上传 | 文本字段 + 二进制文件部分 |
 | 9 | 二进制上传 (octet-stream) | 4KB ArrayBuffer，服务端回显字节数与 sha256 |
-| 10 | 网络安全配置: trust-anchors | 无代码级 CA，验证应用级信任锚点是否生效（RCP 实测不遵循） |
-| 11 | 网络安全配置: 明文权限 | 探测 component-config 明文管控是否生效 |
-| 12 | NSC × RCP: `remoteValidation='system'` | 显式系统 CA 库：证明 RCP 不读应用级 NSC trust-anchors |
-| 13 | NSC × RCP: 代码级 CA 覆盖默认 | `remoteValidation={content}` 覆盖默认 `'system'` |
-| 14 | NSC × RCP: `remoteValidation='skip'` | RCP 独有：绕过全部证书校验（Network Kit/Axios 为 N/A） |
-| 15 | NSC × RCP: `ValidationCallback` | RCP 独有：自定义校验完全替换默认信任逻辑 |
-| 16 | 用户安装的 CA: 是否被信任 | 不带代码级 CA 访问 `:9443`（证书只由用户 CA 签发）——测"用户装了代理 CA 时能否被 MITM" |
-| 17 | 用户安装的 CA: 代码级信任 (对照) | 同一端点用代码级 CA，必须 200（否则核心探针不可解） |
 
-> 场景 10–15 由独立模块 `entry/src/main/ets/nsc/` 提供（**NSC 验证套件**），
-> 说明、结果矩阵与跨系统版本复验流程见 [`NSC-VERIFICATION.md`](NSC-VERIFICATION.md)。
->
-> 这 6 个场景可一次跑完：点首页顶部 **「自检 NSC × RCP 组（结果写 hilog）」** 按钮，
-> 结果同时写入 hilog（关键字 `NSCTEST`），便于无头验证：
+NSC（网络安全配置）场景 14 张，由独立模块 `entry/src/main/ets/nsc/` 提供
+（**NSC 验证套件**，排在常规 9 张之后；说明、结果矩阵、跨版本复验流程与变体实验见
+[`NSC-VERIFICATION.md`](NSC-VERIFICATION.md)）：
+
+| # | 场景 key | 说明 |
+|---|----------|------|
+| 10 | `nscTrust` | 无代码级 CA，纯靠 NSC `trust-anchors`（RCP 实测不遵循 → `1007900060`） |
+| 11 | `nscCleartext` | 探测 `component-config` 明文管控是否生效 |
+| 12 | `nscTrustSystem` | RCP 显式 `remoteValidation='system'`：证明 RCP 不读应用级 NSC trust-anchors |
+| 13 | `nscTrustCa` | 代码级 CA 覆盖默认（`caData` / `remoteValidation.content` / `caPath`） |
+| 14 | `nscTrustSkip` | RCP 独有：`'skip'` 绕过全部链校验（Network Kit/Axios 为 N/A） |
+| 15 | `nscTrustCallback` | RCP 独有：`ValidationCallback` 完全替换默认信任逻辑 |
+| 16 | `pinSpki` | pin = 公钥(SPKI) SHA-256 base64，确认摘要语义 |
+| 17 | `pinWrong` | 链正常但 pin 错 → 是否强制锁定（`2300090` / `1007900090`） |
+| 18 | `pinCertHash` | 用整证书摘要作 pin → 是否被接受（实测被拒） |
+| 19 | `pinBackup` | `[错误, 正确]` → 判定 pin 数组是否为白名单 |
+| 20 | `pinSkipTrust` | RCP 独有：`'skip'` + 错误 pin（pinning 是否仍生效） |
+| 21 | `pinUntrustedTrust` | RCP 独有：`'system'` + 正确 pin（pin 能否救回不受信链） |
+| 22 | `userCaTrust` | 不带代码级 CA 访问 `:9443`（证书只由用户 CA 签发）——测"设备装了代理 CA 时能否被 MITM" |
+| 23 | `userCaByCodeCa` | 同一端点的代码级 CA 对照，必须 200（否则核心探针不可解） |
+
+> 这 14 个场景可一次跑完：点首页顶部 **「自检 NSC × RCP 组（结果写 hilog）」** 按钮，
+> 一次跑完 14 场景 × 3 框架 = **42 行**，结果同时写入 hilog（关键字 `NSCTEST`），便于无头验证：
 > `devecocli log --device "Pura 90" --bundle-name com.example.networkcompare --keyword NSCTEST --from 5m --tail 100`
 > ⚠️ 这些场景依赖 `network_config.json`，改配置需重新构建部署；矩阵与变体实验见
 > [`AGENTS.md`](AGENTS.md) 与 [`../COMPARISON.md`](../COMPARISON.md)。
@@ -58,9 +76,11 @@ devecocli run --device "Pura 90"                 # 构建+安装+启动（debug 
 ## 配置
 
 - **服务器地址**：App 首页顶部可改。默认 `10.0.2.2`（模拟器访问宿主机回环）；
-  真机改为开发机局域网 IP。
-- **端口**：8080（HTTP/1.1 明文）/ 8443（HTTP/2 TLS），定义于
-  `entry/src/main/ets/common/AppConfig.ets`。
+  **真机推荐用 `hdc -t <serial> rport tcp:8080 tcp:8080`（8443/9443 同理）建立反向转发，
+  然后填 `127.0.0.1`** —— 本机真机与宿主同网段但 ping 不通（疑似 AP 隔离），
+  改用局域网 IP 需先确认可达。
+- **端口**：8080（HTTP/1.1 明文）/ 8443（HTTP/2 TLS）/ **9443（用户 CA 实验专用 TLS）**，
+  定义于 `entry/src/main/ets/common/AppConfig.ets`。
 - **HTTPS 证书**：mock server 自签名证书的 PEM 内嵌在 `AppConfig.MOCK_CA_PEM`。
   Network Kit 用 `caData`、RCP 用 `remoteValidation`、**Axios 用 `caPath`（无 caData，
   运行时把 PEM 写到 `${filesDir}/mock-ca.pem`）**。
@@ -74,10 +94,19 @@ ets/
 ├── pages/Index.ets               # comparison UI: scenario cards + three result columns
 ├── common/AppConfig.ets          # server host/port + embedded CA PEM
 ├── model/ScenarioResult.ets      # result model (ok/summary/detail/statusCode)
+├── model/ScenarioDef.ets         # card interface + runner/sink types
 ├── netkit/NetKitScenarios.ets    # Network Kit scenarios
 ├── rcp/RcpScenarios.ets          # RCP scenarios
-└── axios/AxiosScenarios.ets      # @ohos/axios scenarios
+├── axios/AxiosScenarios.ets      # @ohos/axios scenarios
+└── nsc/                          # NSC verification suite (self-contained)
+    ├── NscSuite.ets              # card registry + headless self-test runner
+    ├── NscRcp.ets / NscNetKit.ets / NscAxios.ets   # three columns, 14 scenarios
+    ├── NscPins.ets               # pin digests of the mock cert (npm run pins)
+    └── NscEnv.ets                # OS/API-level stamp for cross-version comparison
 ```
+
+> 改 NSC 验证只需动 `ets/nsc/`；`Index.ets` 只调用 `NscSuite.cards()` 与
+> `NscSuite.runSelfTest()`。
 
 ## 与 mock-server 的协作
 

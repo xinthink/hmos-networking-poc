@@ -91,7 +91,8 @@ devecocli log --device "Pura 90" --bundle-name com.example.networkcompare \
   --keyword NSCTEST --from 5m --tail 200 | grep NSCTEST
 ```
 
-输出（18 行 = 6 场景 × 3 框架，外加 ENV/DONE 两行）。下面是**真实日志片段**
+输出当前为 **42 行**（14 场景 × 3 框架，外加 ENV/DONE 两行）。下面是**真实日志片段**
+——取自套件早期（仅 6 个信任/明文场景，`ran=18`）的一轮，字段格式沿用至今相同
 （`summary` 里的中文是 App 自己的文案，属程序输出而非图内文字）：
 
 ```text
@@ -113,27 +114,28 @@ UI 上每张卡片三列按钮（Network Kit / RCP / axios）独立可点，用�
 
 ## 5. 结果矩阵（按系统版本）
 
-| 场景 | 列 | 期望 | HarmonyOS 6.1.1(24) 实测<br>（emulator 6.1.0.126） | 真机 / 新版本待填<br>（见 §11） |
+| 场景 | 列 | 期望 | 模拟器实测<br>（OpenHarmony 6.1.1(24)） | **真机实测**<br>（LEM-AL00 6.1.0.135，2026-09） |
 |---|---|---|---|---|
-| `nscTrust` | netkit | 200 | ✅ 200 | |
-| `nscTrust` | rcp | FAIL | ✅ FAIL 1007900060 | |
-| `nscTrust` | axios | 200 | ✅ 200 | |
-| `nscTrustSystem` | rcp | FAIL | ✅ FAIL 1007900060 | |
-| `nscTrustCa` | 三方 | 200 | ✅ 三方 200 | |
-| `nscTrustSkip` | rcp | 200 | ✅ 200 | |
-| `nscTrustCallback` | rcp | FAIL | ✅ FAIL 1007900060 | |
-| `nscCleartext` | 三方 | 见 §8 变体 | ✅ 三方 200（提交版配置） | |
-| `pinSpki` | 三方 | 200 | ✅ 三方 200 | |
-| `pinWrong` | 三方 | FAIL | ✅ FAIL（2300090 / 1007900090） | |
-| `pinCertHash` | 三方 | FAIL | ✅ FAIL | |
-| `pinBackup` | 三方 | 200 | ✅ 三方 200 | |
-| `pinSkipTrust` | rcp | FAIL | ✅ FAIL 1007900090 | |
-| `pinUntrustedTrust` | rcp | FAIL | ✅ FAIL 1007900060 | |
+| `nscTrust` | netkit | 200 | ✅ 200 | ✅ 200 |
+| `nscTrust` | rcp | FAIL | ✅ FAIL 1007900060 | ✅ **FAIL 1007900060（同）** |
+| `nscTrust` | axios | 200 | ✅ 200 | ✅ 200 |
+| `nscTrustSystem` | rcp | FAIL | ✅ FAIL 1007900060 | ✅ **FAIL 1007900060（同）** |
+| `nscTrustCa` | 三方 | 200 | ✅ 三方 200 | ✅ 三方 200 |
+| `nscTrustSkip` | rcp | 200 | ✅ 200 | ✅ 200 |
+| `nscTrustCallback` | rcp | FAIL | ✅ FAIL 1007900060 | ✅ FAIL 1007900060 |
+| `nscCleartext` | 三方 | 见 §8 变体 | ✅ 三方 200（提交版配置） | ✅ 三方 200 |
+| `pinSpki` | 三方 | 200 | ✅ 三方 200 | ✅ 三方 200 |
+| `pinWrong` | 三方 | FAIL | ✅ FAIL（2300090 / 1007900090） | ✅ FAIL（同错误码） |
+| `pinCertHash` | 三方 | FAIL | ✅ FAIL | ✅ FAIL |
+| `pinBackup` | 三方 | 200 | ✅ 三方 200 | ✅ 三方 200 |
+| `pinSkipTrust` | rcp | FAIL | ✅ FAIL 1007900090 | ✅ FAIL 1007900090 |
+| `pinUntrustedTrust` | rcp | FAIL | ✅ FAIL 1007900060 | ✅ FAIL 1007900060 |
+| `userCaTrust` | 三方 | 见 §6-G | ✅ 三方 200（用户 CA 已装）；未装时三方 FAIL | ✅ 三方 200（装 CA 后）/ FAIL（未装，2300060 & 1007900060） |
+| `userCaByCodeCa` | 三方 | 200 | ✅ 三方 200 | ✅ 三方 200 |
 
-| `userCaTrust` | 三方 | 见 §6-G | ✅ 三方 200（**用户 CA 已装在设备上**）；未装时为三方 FAIL | |
-| `userCaByCodeCa` | 三方 | 200 | ✅ 三方 200 | |
-
-汇总：`ran=42 pass=31`（用户 CA 已装 + 提交版配置）；未装用户 CA 时为 `pass=28`。
+**真机结论：42 行与模拟器逐行一致**（唯一差异是设备是否装了用户 CA，与框架无关）——
+即"RCP 忽略 NSC `trust-anchors`/`pin-set`、但遵守用户 CA opt-out"这组结论**在真机上同样成立**。
+`ran=42 pass=31`（已装用户 CA）/ `pass=28`（未装），两端一致。
 
 ## 6. 配置关系与优先级（证书锁定 / 用户 CA）
 
@@ -366,13 +368,13 @@ hdc shell "aa start -b com.ohos.certmanager -a MainAbility"
 
 1. 记录环境：`devecocli device view` 或在自检日志的 `ENV` 行读取系统版本与 API level。
 2. `devecocli build && devecocli run --device <name> --skip-build --uninstall`。
-3. 按 §4.1 跑自检，拿到 18 行结果 + ENV/DONE。
+3. 按 §4.1 跑自检，拿到 42 行结果 + ENV/DONE（其中 ENV 行已带系统版本）。
 4. 与上表逐行对比，关注三类变化：
    - **RCP 信任行为**：`nscTrust` / `nscTrustSystem` 是否从 FAIL 变 200
      （若变 200 → RCP 开始读应用级 NSC trust-anchors，属重大行为变更）。
    - **RCP 明文行为**：`nscCleartext` 是否被拦（配合 §7 变体一起看）。
    - **错误码**：`1007900060`（SSL 校验失败）/ `1007900201`（明文被禁）是否被替换。
-5. 把结果填进 §5 表格的"新版本待填"列，并在
+5. 把结果填进 §5 表格的真机/新版本列（或新增一列），并在
    `../COMPARISON.md`「RCP SecurityConfiguration × 系统 NSC」一节补一句差异说明。
 6. 若某行与期望不符，先排除环境因素（证书是否重新生成 → `MOCK_CA_PEM` 是否同步、
    NSC 是否被改过），再判定为行为变更。
@@ -437,24 +439,34 @@ hdc shell "aa start -b com.ohos.certmanager -a MainAbility"
     （`OpenHarmony.p12` 等）签出的包会被真机拒绝（`9568257 fail to verify pkcs7 file`），
     未签名包则报 `9568320 no signature file`。详见 §11。
 
-## 10. 待验证事项（Pending，已知未做）
+## 10. 待验证事项（Pending）
 
-以下三项**尚未验证**，按预期价值排序；记录在此以免被误当作已证实结论：
+**已完成（2026-09，真机实测）**：
+
+| # | 项目 | 结论 |
+|---|---|---|
+| ~~1~~ | **真机复测** | ✅ **已完成**：HUAWEI Pocket 2（LEM-AL00，华为 6.1.0.135，API 24）上 42 行结果与模拟器**逐行一致** → "模拟器镜像的 RCP 未接 NSC 集成"这一解释**被排除**；RCP 忽略 `trust-anchors`/`pin-set`、遵守用户 CA opt-out 的结论在真机同样成立（细节见 §11.3） |
+| ~~2~~ | **主机名 vs IP 的域匹配** | ✅ **已完成**：把 host 换成主机名 `localhost`（真机经反向转发）后，`nscTrust` 仍是 netkit 200 / **rcp FAIL 1007900060** → "RCP 只好按主机名匹配 domain-config"这一假设**被否定** |
+
+**仍待验证**：
 
 | # | 待验证 | 为什么要做 | 怎么判定 |
 |---|---|---|---|
-| 1 | **真机复测**（HUAWEI Pocket 2 / 华为 6.1.0.135）—— *已尝试，阻塞于签名* | 现有全部结论来自 `OpenHarmony-6.1.1.125` 模拟器镜像。这是"文档称 RCP 也读 `network_config.json`，实测却不读"这一矛盾的**首要候选解释** | 真机上跑同一份自检，对比 `nscTrust`/`pinSpki`/`userCaTrust` 等 RCP 列。**步骤与前置见 §11** |
-| 2 | **域名（主机名）而非 IP 的 domain 匹配** | 我们的 `domain-config.domains.name` 用的是 IP `10.0.2.2`。Network Kit 按 IP 匹配成功，但 RCP 的实现可能只按**主机名**匹配 domain-config | 把 mock server 用主机名访问（如 `localhost` / 自定义 hosts 名）重跑 `nscTrust` |
 | 3 | **真实 MITM 代理演示**（用户已明确留待以后） | 本套件只做了机制验证：由用户 CA 直接给测试服务器签证书。要证明"攻击确实成功/被挡住"，还需要一个 TLS 终止 + 用用户 CA 现场签发伪造证书的代理进程，并处理代理配置（实测 RCP 日志为 `proxyType:none`，它默认不走系统代理） | 加 MITM 代理后重跑 `userCaTrust` |
 | 4 | **CA 目录形态** | 我们的 `trust-anchors.certificates` 目录里同时放 `cert.pem` 与 `openssl x509 -hash` 命名的 `<hash>.0`。Network Kit 接受，RCP 的加载器可能只认其中一种 | 分别只放 `<hash>.0` / 只放 `cert.pem` 各跑一轮 |
 
-> 结论口径：在上述三项完成前，本套件的 RCP 遵循度结论应表述为
-> "**在 OpenHarmony 6.1.1(24) 模拟器镜像、IP 域匹配、当前 CA 目录形态下**，
-> RCP 不遵守 NSC 的 `trust-anchors` 与 `pin-set`"。
+> 结论口径（真机复测后已收窄）：RCP 的 NSC 遵循度结论现在**同时成立于
+> 模拟器（OpenHarmony 6.1.1(24)）与真机（LEM-AL00 6.1.0.135）**，且与域匹配方式
+> （IP `10.0.2.2` / `127.0.0.1` 或主机名 `localhost`）无关。
+> **仍受限于**：CA 目录形态（第 4 项，未验证）。
 
-## 11. 真机验证（已就绪，阻塞于签名）
+## 11. 真机验证（✅ 已完成，2026-09）
 
-### 11.1 当前状态
+> 结论：真机 **HUAWEI Pocket 2（LEM-AL00，华为 6.1.0.135，API 24）** 上，
+> 自检 42 行与模拟器**逐行一致**；RCP 的 NSC 遵循度结论在真机同样成立。
+> 实测细节见 §11.3，运行步骤见 §11.5。
+
+### 11.1 历史阻塞（已由 DevEco 自动签名解决）
 
 真机 **HUAWEI Pocket 2（`LEM-AL00`，软件 6.1.0.135，API 24）** 已连上；除**签名**外的前置
 全部就绪（见 11.2）。签名阻塞与两条错误码：
@@ -463,13 +475,21 @@ hdc shell "aa start -b com.ohos.certmanager -a MainAbility"
 |---|---|
 | `devecocli run --device "HUAWEI Pocket 2"` （未签名 hap） | `Target device is a real device, but the artifact for 'entry' is not signed` |
 | `hdc install` 未签名 hap | `error: failed to install bundle. code:9568320 error: no signature file` |
-| 用 SDK 的 OpenHarmony 默认材料本地签名（见 11.4） | 签名成功，但安装被拒：**`9568257 error: fail to verify pkcs7 file`** |
+| 用 SDK 的 OpenHarmony 默认材料本地签名（见 11.6） | 签名成功，但安装被拒：**`9568257 error: fail to verify pkcs7 file`** |
 
 → **华为零售机不信任 OpenHarmony 默认签名链**，必须用华为签发的调试 profile。
 
-**解锁办法（需人工，一次即可）**：DevEco Studio → `File ▸ Project Structure ▸ Signing Configs`
-→ 勾选 **Automatically generate signature**（需登录华为开发者账号，且设备已连接；DevEco 会把
-设备 UDID 注册进调试 profile）。之后：
+**已采用的解法**：DevEco Studio → `File ▸ Project Structure ▸ Signing Configs`
+→ 勾选 **Automatically generate signature**（登录华为开发者账号、设备已连接；DevEco 会把
+设备 UDID 注册进调试 profile）。它会：
+
+1. 在 `~/.ohos/config/` 生成 `default_<project>_*.cer / .p12 / .p7b`；
+2. **把 `signingConfigs` 写进 `network-compare/build-profile.json5`**（含**本机绝对路径**与
+   `keyPassword`/`storePassword` blob）——⚠️ **这个改动不要提交**（机器/账号相关），
+   提交前用 `git checkout -- network-compare/build-profile.json5` 还原，或在提交时只
+   `git add` 明确列出的文件。
+
+之后：
 
 ```bash
 cd network-compare
@@ -484,11 +504,49 @@ devecocli run --device "HUAWEI Pocket 2"          # 应能签名并安装
 | 系统 / API | `const.ohos.apiversion` = **24**；`const.ohos.fullname` = `OpenHarmony-6.1.1.120`；软件版本 `6.1.0.135(SP8C00E120R6P6)`；UDID `BF59…4861` |
 | RCP 能力域 | `const.SystemCapability.Collaboration.RemoteCommunication = true`；`CollaborationFw` 进程在 |
 | 证书管理（用户 CA 实验前提） | `Security.CertificateManager(Dialog) = true`、`cert_manager_se` 进程在、`com.ohos.certmanager` 存在 → 用户 CA 安装路径具备（且真机的 `openInstallCertificateDialog` **可能可用**，模拟器上返回 29700004，值得先试 App 内按钮） |
-| 网络通路 | 设备 `192.168.1.7` 与宿主 `192.168.1.15` 同网段但 **ping 不通**（疑似 AP 隔离）→ 改用 **hdc 反向端口转发**（见 11.3），设备侧走 `127.0.0.1` |
+| 网络通路 | 设备 `192.168.1.7` 与宿主 `192.168.1.15` 同网段但 **ping 不通**（疑似 AP 隔离）→ 改用 **hdc 反向端口转发**（见 11.5），设备侧走 `127.0.0.1` |
 | 设备端 HTTP 工具 | 无 curl/wget/nc（toybox 里也没有 wget）→ 首次请求靠 mock server 的 `[req]` 日志确认 |
 | shell 权限 | `uid=2000(shell)`，无 root（与模拟器相同） |
 
-### 11.3 真机运行步骤（copy-paste）
+### 11.3 真机实测结果（2026-09）
+
+自检 42 行**与模拟器逐行一致**（唯一差异是"设备是否装了用户 CA"，与框架无关）：
+
+| 关键 RCP 行 | 模拟器 | 真机 |
+|---|---|---|
+| `nscTrust` rcp（NSC 应用级信任锚点） | ❌ 1007900060 | ❌ **1007900060** |
+| `nscTrustSystem` rcp（显式 `'system'`） | ❌ 1007900060 | ❌ 1007900060 |
+| `pinSpki` rcp（NSC `pin-set` 为错、动态 pin 对） | ✅ 200（不受 NSC 约束） | ✅ **200** |
+| `pinSkipTrust` / `pinUntrustedTrust` rcp | ❌ 1007900090 / ❌ 1007900060 | ❌ 同 |
+| `userCaTrust`（用户 CA 已装 + flags 缺省） | ✅ 200 | ✅ **200** |
+| `userCaTrust`（用户 CA 已装 + `trust-*-user-ca: false`） | ❌ 1007900060 | ❌ **1007900060** |
+| `userCaTrust`（未装用户 CA，阴性对照） | ❌ 1007900060 | ❌ 1007900060 |
+| `userCaByCodeCa`（对照） | ✅ 200 | ✅ 200 |
+
+三阶段都跑了：①未装 CA → 三方 FAIL；②装 CA + 缺省 → 三方 200（`pass=31`）；
+③装 CA + `trust-*-user-ca: false` → 三方 FAIL（`pass=28`）。
+**主机名验证**：host 设为 `localhost` 时结果与 `127.0.0.1` 逐行一致 →
+`nscTrust` netkit 200、**rcp 仍 FAIL**（否定了"RCP 只好按主机名匹配"的假设）。
+
+真机额外确认的两件事：
+
+- **应用侧 `openInstallCertificateDialog` 在真机上也返回 `29700004`**（不是模拟器特例）→
+  装用户 CA 必须走证书管理 UI（§6-G 的路径；真机 UI 为中文：
+  「证书与凭据 → 从存储设备安装 → CA 证书 → 安装 → 浏览 → 下载 → 选中 `.crt` → 完成 →
+  安装成功」）。
+- 真机 hilog 经 `devecocli log` 读取时**偶发中文乱码**（如"成功"→"成???"），
+  仅影响日志读取显示，不影响 App UI 与判定（判定只看 OK/FAIL 与错误码）。
+
+### 11.4 真机自动化的两个坑（本仓库踩过）
+
+1. **`uitest uiInput inputText` 在真机上不稳定**：多次出现"点了输入框但文字没进去"
+   （host 字段最终为空 → 全部请求报 `2300003 Invalid URL format or missing URL`，
+   `pass` 掉到 8）。**可靠做法**：自动化跑真机时**临时把 `AppConfig.host` 默认值改成目标
+   地址**（本次即用它完成了 `localhost` 测试），跑完再还原——不必依赖 UI 输入。
+2. **文件选择器有一次性引导浮层**：真机「浏览」页会出现「知道了」提示浮层挡住点击，
+   必须先点掉（本次第一次点击"下载"无效就是这个原因）。
+
+### 11.5 真机运行步骤（copy-paste）
 
 ```bash
 # 1) 反向端口转发：设备侧 127.0.0.1:{8080,8443,9443} -> 宿主机 mock server
@@ -505,11 +563,12 @@ cd mock-server && npm start               # :8080 / :8443 / :9443
 cd ../network-compare
 devecocli build && devecocli run --device "HUAWEI Pocket 2" --skip-build --uninstall
 
-# 4) 把 App 里的 host 改成 127.0.0.1（UI 顶部输入框 + 「应用」按钮）
-#    坐标先取（真机分辨率与模拟器不同）：
-hdc -t $D shell "uitest dumpLayout -p /data/local/tmp/l.json" && hdc -t $D shell "cat /data/local/tmp/l.json" > /tmp/l.json
-#    用 dump 到的输入框中心坐标替换 <X> <Y>：
-hdc -t $D shell "uitest uiInput inputText <X> <Y> 127.0.0.1"
+# 4) 把 App 里的 host 改成 127.0.0.1
+#    ⚠️ 推荐做法：临时把 AppConfig.host 默认值改成 '127.0.0.1'，重新 build+run，
+#    跑完 `git checkout -- entry/src/main/ets/common/AppConfig.ets` 还原。
+#    原因见 §11.4 坑 1：真机 `uitest uiInput inputText` 会**静默失败**，
+#    host 变空 → 全场景 2300003、pass 掉到 8。
+#    （若仍走 UI：dumpLayout 取输入框坐标 → inputText → **回读输入框内容确认生效**）
 
 # 5) 点自检（坐标同样来自 dumpLayout），读结果
 hdc -t $D shell "hilog -r"
@@ -527,7 +586,7 @@ devecocli log --device "HUAWEI Pocket 2" --bundle-name com.example.networkcompar
 `USERCATEST`；若真机同样返回 29700004，则走证书管理 UI（路径同 §6-G，注意真机 UI 文案可能是中文）。
 CA 文件先在宿主侧生成（`npm run user-ca`）再推入设备文档目录。
 
-### 11.4 本机本地签名尝试的记录（供以后复用/排错）
+### 11.6 本机本地签名尝试的记录（供以后复用/排错）
 
 本机 **没有** `~/.ohos/config/`（无 DevEco 自动签名材料），但 DevEco 自带完整
 OpenHarmony 签名工具链：`sdk/default/openharmony/toolchains/lib/{hap-sign-tool.jar,
