@@ -18,7 +18,7 @@ Cookie、Cache（含 ETag）、Multipart、二进制上传等差异。另有第�
 |------|------|
 | [`README.md`](README.md) | 仓库总览、快速开始、目录结构 |
 | [`COMPARISON.md`](COMPARISON.md) | 逐项对比矩阵、模拟器实测结果、可行性结论 |
-| [`network-compare/NSC-VERIFICATION.md`](network-compare/NSC-VERIFICATION.md) | **NSC 验证套件文档**：`ets/nsc/` 模块地图、6 场景清单、按系统版本的结果矩阵、跨版本手工复验流程、明文 build-variant 实验、已知坑 |
+| [`network-compare/NSC-VERIFICATION.md`](network-compare/NSC-VERIFICATION.md) | **NSC 验证套件文档**：`ets/nsc/` 模块地图、12 场景清单（信任/明文/证书锁定）、按系统版本的结果矩阵、跨版本手工复验流程、明文与 pin 的 build-variant 实验、已知坑 |
 | [`docs/harmonyos-network-libraries.md`](docs/harmonyos-network-libraries.md) | **技术文档**：四类网络库（Network Kit ArkTS/Cangjie、RCP、`@ohos/axios`、`stdx.net.http`）的定位、生态、技术原理、优缺点与约束限制；含 ① 技术总览架构图 ② RCP 进程/内存/隔离架构图；附可复现的验证命令（hilog pid、编译器级 API 验证、SDK 逆向） |
 
 > 新增文档或子工程时，**必须同步更新本索引与下面的子工程一览表**。
@@ -122,6 +122,8 @@ devecocli emulator list / start "Pura 90"
      `openssl x509 -hash` 命名的 `<hash>.0` 副本（network_config.json 系统级信任锚点）；
    - `cj-network-compare/entry/src/main/resources/resfile/mock-ca/` 下的同名副本
      （Cangjie 版 `caPath` 指向 bundle 内的 `cert.pem`，见 cj-network-compare/AGENTS.md）。
+   - **第四处：证书锁定值** `network-compare/.../nsc/NscPins.ets`（`cd mock-server && npm run pins`
+     重算），以及任何 `network_config.json` 的 `pin-set.digest`。
 3. **场景镜像**：每个对比场景在 App 各 runner 中同名成对实现（
    `NetKitScenarios.xxx` ↔ `RcpScenarios.xxx` ↔ `AxiosScenarios.xxx`），并对应
    mock server 的一个或多个端点。新增场景的完整步骤见各子项目 AGENTS.md。
@@ -142,6 +144,7 @@ devecocli emulator list / start "Pura 90"
 | Multipart / 二进制上传 | ✅ | ✅ | ✅（`axios.FormData` / `data:ArrayBuffer`） |
 | 网络安全配置: trust-anchors | ✅ 遵循 network_config.json 应用级信任锚点（base+domain 都需配置） | ❌ **完全不遵循**；缺省与显式 `remoteValidation: 'system'` 都失败（1007900060），只能用代码级 `remoteValidation` | ✅ 遵循（跟随 net.http，同 Network Kit） |
 | 网络安全配置: 明文控制 | ✅ 受 component-config 约束（默认 true=受控） | ⚠️ 全局 `cleartextTrafficPermitted: false` **拦不住 RCP**（实测仍 200）；只有 `component-config."Remote Communication Kit": true` 才受控（否则 1007900201） | ✅ 受 `"Network Kit"` 组件配置约束（底层是 net.http） |
+| 证书锁定 (pin) | ✅ `certificatePinning` 生效（错误 pin → 2300090）；`publicKeyHash` = **公钥(SPKI) SHA-256**；数组为白名单 | ✅ 同样生效（1007900090）；与 `remoteValidation` 是 **AND**，且 `'skip'` **不**放弃 pinning；**忽略 NSC `pin-set`** | ✅ 透传 `config.certificatePinning`（同 Network Kit） |
 | 协议/缓存/连接可观测性 | ✅ `connectionExtraInfo`（协议名、isCacheHit） | ✅ `httpVersion` / `cacheInfo` | ❌ 仅 `performanceTiming`，**不暴露协议版本/isCacheHit/cookies** |
 | 自动 JSON 解析 | ❌ 手动 `JSON.parse` | ⚠️ `toJSON()` | ✅ 默认自动（`forcedJSONParsing`） |
 
@@ -186,7 +189,7 @@ devecocli emulator list / start "Pura 90"
 2. `cd network-compare && devecocli build`。
 3. `devecocli run --device "Pura 90"` 部署启动。
 4. **优先用自检按钮（推荐）**：点 UI 顶部「自检 NSC × RCP 组（结果写 hilog）」按钮，
-   一次跑完 6 个安全配置场景 × 三框架并写 hilog，然后
+   一次跑完 12 个安全配置场景 × 三框架（36 行）并写 hilog，然后
    `devecocli log --device "Pura 90" --bundle-name com.example.networkcompare --keyword NSCTEST --from 5m --tail 100`。
    ⚠️ **不要与其它 hdc/uitest 命令并行**（两个 uitest 会话会互相阻塞）。
 5. 其它场景用 UI 自动化：`uitest dumpLayout` 取按钮 bounds → `uitest uiInput click <x> <y>`
@@ -194,7 +197,10 @@ devecocli emulator list / start "Pura 90"
    需重新 dumpLayout 取最新坐标（完整命令见 `network-compare/AGENTS.md`）。
 6. 结合 mock server 的 `[req] ...` 请求日志与服务端计数端点验证客户端行为。
 7. **NSC（安全配置）相关实验**：配置随 HAP 打包，改配置必须重新构建+重装；
-   实验后务必 `git checkout --` 还原（变体矩阵见 `network-compare/AGENTS.md`）。
+   实验后务必 `git checkout --` 还原（明文/证书锁定的变体矩阵见
+   `network-compare/AGENTS.md` 与 `NSC-VERIFICATION.md` §8）。
+8. 自检会同时覆盖**证书锁定**（`pin*` 场景）；改了证书别忘了先 `npm run pins` 更新
+   `NscPins.ets`，否则 pin 场景会因摘要过期而全红。
 
 ## 代码风格（全仓库）
 

@@ -15,6 +15,7 @@ import { http } from '@kit.NetworkKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { AppConfig } from '../common/AppConfig';
 import { ScenarioResult } from '../model/ScenarioResult';
+import { NscPins } from './NscPins';
 
 /** ArkTS forbids `any`/`unknown`, so axios needs all three type args spelled out. */
 type NscAxiosResp = AxiosResponse<Record<string, string>, null>;
@@ -126,5 +127,74 @@ export class NscAxios {
   static async nscTrustCallback(): Promise<ScenarioResult> {
     return new ScenarioResult(true, 'N/A — 无对应能力',
       'axios 底层是 net.http（API 24），无自定义证书校验回调；对应能力仅存在于 RCP 的 remoteValidation=ValidationCallback。');
+  }
+
+  // ---- certificate pinning (passthrough to net.http) -------------------------
+  //
+  // The adapter forwards `config.certificatePinning` to
+  // `HttpRequestOptions.certificatePinning`, so axios mirrors Network Kit here.
+
+  /** HTTPS GET with a code-level CA plus one or more pins. */
+  private static async pinProbe(filesDir: string, pin: http.CertificatePinning | http.CertificatePinning[],
+                                okSummary: string, failSummary: string,
+                                note: string): Promise<ScenarioResult> {
+    try {
+      const ca = await NscAxios.ensureCaFile(filesDir);
+      const config: AxiosRequestConfig = NscAxios.baseConfig();
+      config.usingProtocol = http.HttpProtocol.HTTP2;
+      config.caPath = ca;
+      config.certificatePinning = pin;
+      const resp = await axios.get<Record<string, string>, NscAxiosResp, null>(
+        `${AppConfig.httpsBase()}/api/protocol`, config);
+      const ok = resp.status === 200;
+      return new ScenarioResult(ok, ok ? okSummary : failSummary,
+        `HTTP status : ${resp.status}\nnote        : ${note}`, resp.status);
+    } catch (e) {
+      return NscAxios.err(failSummary, e as NscAxiosErr);
+    }
+  }
+
+  /** Correct SPKI pin + caPath. Expected: 200. */
+  static async pinSpki(filesDir: string): Promise<ScenarioResult> {
+    return NscAxios.pinProbe(filesDir, { publicKeyHash: NscPins.SPKI_SHA256, hashAlgorithm: 'SHA-256' },
+      'SPKI pin 匹配（HTTPS OK）', 'SPKI pin 被拒（意外）',
+      'caPath + certificatePinning=SPKI sha256');
+  }
+
+  /** Wrong pin + caPath. Expected: FAIL if pinning is enforced. */
+  static async pinWrong(filesDir: string): Promise<ScenarioResult> {
+    return NscAxios.pinProbe(filesDir, { publicKeyHash: NscPins.WRONG, hashAlgorithm: 'SHA-256' },
+      '错误 pin 被放行（意外：pinning 未生效）', '错误 pin 被拒：pinning 在信任之外强制执行（AND）',
+      'caPath + certificatePinning=错误摘要');
+  }
+
+  /** Digest-semantics probe: whole-cert hash. Expected: FAIL. */
+  static async pinCertHash(filesDir: string): Promise<ScenarioResult> {
+    return NscAxios.pinProbe(filesDir, { publicKeyHash: NscPins.CERT_SHA256, hashAlgorithm: 'SHA-256' },
+      '整证书摘要被放行', '整证书摘要被拒：publicKeyHash 取的是公钥(SPKI)摘要',
+      'caPath + certificatePinning=整证书 sha256');
+  }
+
+  /** Backup-pin semantics: [wrong, correct]. Expected: 200 (whitelist). */
+  static async pinBackup(filesDir: string): Promise<ScenarioResult> {
+    const pins: http.CertificatePinning[] = [
+      { publicKeyHash: NscPins.WRONG, hashAlgorithm: 'SHA-256' },
+      { publicKeyHash: NscPins.SPKI_SHA256, hashAlgorithm: 'SHA-256' },
+    ];
+    return NscAxios.pinProbe(filesDir, pins,
+      'pin 数组命中其一即通过（白名单语义）', 'pin 数组未命中（意外）',
+      'caPath + certificatePinning=[错误摘要, SPKI sha256]');
+  }
+
+  /** N/A: axios has no "skip trust validation" option to combine with pinning. */
+  static async pinSkipTrust(): Promise<ScenarioResult> {
+    return new ScenarioResult(true, 'N/A — 无对应能力',
+      'axios 无跳过信任校验的开关（无法构造 skip + pin 组合）；对应组合仅存在于 RCP。');
+  }
+
+  /** N/A: axios cannot force "system CA store only" while NSC trusts the mock CA. */
+  static async pinUntrustedTrust(): Promise<ScenarioResult> {
+    return new ScenarioResult(true, 'N/A — 无对应能力',
+      'axios 无法在不带 caPath 的前提下强制只信系统 CA（NSC trust-anchors 会生效），对应组合仅存在于 RCP。');
   }
 }

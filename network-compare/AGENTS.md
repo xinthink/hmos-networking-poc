@@ -17,9 +17,10 @@ ets/
 ├── axios/AxiosScenarios.ets      # @ohos/axios scenarios, NSC excluded (see Axios notes below)
 └── nsc/                          # NSC verification suite, self-contained
     ├── NscSuite.ets              # card registry + headless self-test runner (single entry point)
-    ├── NscRcp.ets                # RCP column: 6 scenarios + 5 session builders
+    ├── NscRcp.ets                # RCP column: 12 scenarios + session builders
     ├── NscNetKit.ets             # Network Kit column: control + N/A placeholders
     ├── NscAxios.ets              # axios column: control + N/A placeholders
+    ├── NscPins.ets               # pin digests of the mock cert (npm run pins to recompute)
     └── NscEnv.ets                # OS/API-level stamp for cross-version comparison
 ```
 
@@ -142,6 +143,12 @@ devecocli log --device "Pura 90" --bundle-name com.example.networkcompare --from
     置 true 后 RCP 才被拦（`1007900201 Plaintext transmission is forbidden`）。
   - **优先级**：信任看 RCP 自身 `SecurityConfiguration`（NSC 零作用）；明文看 NSC
     组件开关（RCP 无明文字段），且 **组件开关 > 全局开关**。
+  - **证书锁定**：RCP 的 `remoteValidation` 与 `certificatePinning` 是 **AND**，
+    且 `'skip'` 只放弃链校验、**不放弃 pinning**；NSC 的 `trust-anchors` 与 `pin-set`
+    也是 **AND**，且**生效中的静态 `pin-set` 覆盖请求级 `certificatePinning`**；
+    RCP 同样**忽略** NSC 的 `pin-set`（详见 `NSC-VERIFICATION.md` §6）。
+  - ⚠️ **pin 值随证书失效**：证书重新生成后必须 `cd ../mock-server && npm run pins`
+    重算并更新 `ets/nsc/NscPins.ets` 及任何 `pin-set`（与 `MOCK_CA_PEM` 同级要求）。
   - ⚠️ 配置随 HAP 打包，**改动必须重新 build + 重装**（见下方"明文变体实验"）。
 - ⚠️ `NscRcp.newCallbackSession()` 用 `networkSecurity.certVerificationSync`
   校验链——它对自签/不受信证书**抛异常**而非返回非 0，因此该处必须 try/catch 并映射为
@@ -149,9 +156,10 @@ devecocli log --device "Pura 90" --bundle-name com.example.networkcompare --from
 
 ### 无头验证：自检按钮 + NSCTEST 日志（推荐，别硬拖 UI）
 UI 顶部有一个 **「自检 NSC × RCP 组（结果写 hilog）」** 按钮：一次点击顺序跑完
-`NscSuite.KEYS`（`nscTrust`、`nscCleartext`、`nscTrustSystem`、`nscTrustCa`、
-`nscTrustSkip`、`nscTrustCallback`）× 三框架（`NscSuite.runSelfTest()`，在 `ets/nsc/` 内），
-并把每行结果写 hilog；结果同时回填 UI 三列：
+`NscSuite.KEYS`（信任/明文 6 个 + 证书锁定 6 个：`nscTrust`、`nscCleartext`、
+`nscTrustSystem`、`nscTrustCa`、`nscTrustSkip`、`nscTrustCallback`、`pinSpki`、`pinWrong`、
+`pinCertHash`、`pinBackup`、`pinSkipTrust`、`pinUntrustedTrust`）× 三框架
+（`NscSuite.runSelfTest()`，在 `ets/nsc/` 内），并把每行结果写 hilog；结果同时回填 UI 三列：
 
 ```bash
 hdc -t 127.0.0.1:5555 shell "hilog -r"
@@ -165,14 +173,18 @@ devecocli log --device "Pura 90" --bundle-name com.example.networkcompare \
 首尾另有 `NSCTEST ENV/DONE ...` 行**携带系统版本**（`osFullName` + `api=` + `deviceType`
 + `displayVersion`），所以日志自带版本标签，跨系统版本对比时不需要另做记录。
 
-**为什么要有这个按钮**：`uitest dumpLayout` 在本 App 上一次往返约 2–5 秒，14 张卡片的
+自检共 **36 行** = 12 场景 × 3 框架（外加 ENV/DONE）。
+
+**为什么要有这个按钮**：`uitest dumpLayout` 在本 App 上一次往返约 2–5 秒，21 张卡片的
 列表需要反复滚动+重定位，逐卡点击极慢且会被"结果区下移"打乱坐标；自检按钮把
-"点 18 次 + 反复滚动"压缩成"点 1 次 + 读日志"。
+"点 36 次 + 反复滚动"压缩成"点 1 次 + 读日志"。
 
 ⚠️ **不要并行执行 hdc/uitest**：两个 `uitest` 会话会互相阻塞，导致双方都超时
 （本仓库踩过：驱动脚本与手工 dump 并行时全部任务报 CARD NOT FOUND）。
 
-### 明文变体实验（build-variant，因为 NSC 随 HAP 打包）
+### 变体实验（build-variant，因为 NSC 随 HAP 打包）
+
+**明文**：
 
 | 变体 | `cleartextTrafficPermitted`(base+domain) | `component-config."Remote Communication Kit"` | 实测结果 |
 |---|---|---|---|
@@ -180,18 +192,33 @@ devecocli log --device "Pura 90" --bundle-name com.example.networkcompare \
 | V1 | false | false | 只有 RCP 200；Network Kit/axios 报 2300997 |
 | V2 | false | true | 三方全拦；RCP 报 1007900201 |
 
+**证书锁定**（`domain-config` 加 `pin-set`，digest 取 `npm run pins` 的 SPKI 值）：
+
+| 变体 | domain `trust-anchors` | `pin-set` | 实测结果 |
+|---|---|---|---|
+| V3 | 有 | 正确，未过期 | `nscTrust` 200；**动态错误 pin 被覆盖为 200** |
+| V4 | 有 | 错误 | `nscTrust`/`nscTrustCa`/`pinSpki`/`pinBackup` 全 FAIL 2300090 |
+| V5 | **无** | 正确 | `nscTrust` FAIL 2300060（pin 不能替代信任锚点） |
+| V6 | 有 | 错误但 `expiration` 已过期 | `nscTrust` 200；动态 pin 恢复生效 |
+
+> 结论：NSC 的 trust-anchors 与 pin-set 是 **AND**；**生效中的域级 `pin-set` 完全覆盖
+> 请求级 `certificatePinning`**（动态 pin 不参与判定）；RCP 对两者都**忽略**。
+
 流程：改 JSON → `devecocli build` → `devecocli run --device "Pura 90" --skip-build --uninstall`
 → 点自检 → 读 NSCTEST → **实验结束后 `git checkout -- <config>` 还原并重建**。
 
 ### 跨系统版本复验（系统升级后手工做一次）
-完整流程与结果矩阵见 [`NSC-VERIFICATION.md`](NSC-VERIFICATION.md) §5/§6：
+完整流程与结果矩阵见 [`NSC-VERIFICATION.md`](NSC-VERIFICATION.md) §5/§7：
 跑一次自检 → 记下 `ENV` 行版本 → 与矩阵逐行比对（重点看 RCP 的信任/明文行为与错误码
 `1007900060` / `1007900201` 是否变化）→ 把结果填进矩阵并在 `../COMPARISON.md` 补差异说明。
 
-### 场景卡片说明：NSC 组（6 张，全部来自 `ets/nsc/`）
-`nscTrust`（纯靠 NSC trust-anchors）、`nscCleartext`、`nscTrustSystem`（显式 `'system'`）、
-`nscTrustCa`（代码级 CA 覆盖默认）、`nscTrustSkip`、`nscTrustCallback`。
-后两张是 **RCP 独有能力**，Network Kit/axios 列返回
+### 场景卡片说明：NSC 组（12 张，全部来自 `ets/nsc/`）
+信任/明文 6 张：`nscTrust`（纯靠 NSC trust-anchors）、`nscCleartext`、
+`nscTrustSystem`（显式 `'system'`）、`nscTrustCa`（代码级 CA 覆盖默认）、
+`nscTrustSkip`、`nscTrustCallback`。
+证书锁定 6 张：`pinSpki`、`pinWrong`、`pinCertHash`、`pinBackup`、
+`pinSkipTrust`、`pinUntrustedTrust`（后两张为 RCP 独有组合）。
+RCP 独有能力的卡片，Network Kit/axios 列返回
 `ScenarioResult(true, 'N/A — 无对应能力', ...)` 占位（不复用 `error()`，避免 UI 显示 [FAIL]）。
 卡片顺序由 `NscSuite.cards()` 决定，UI 里排在 9 张常规卡片之后。
 

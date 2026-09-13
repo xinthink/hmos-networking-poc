@@ -38,6 +38,12 @@ export class NscSuite {
     'nscTrustCa',         // code-level CA overrides the 'system' default
     'nscTrustSkip',       // RCP-only: bypass every check
     'nscTrustCallback',   // RCP-only: custom ValidationCallback
+    'pinSpki',            // pin == SPKI digest, trust OK
+    'pinWrong',           // wrong pin, trust OK -> is pinning enforced?
+    'pinCertHash',        // whole-cert digest probe (digest semantics)
+    'pinBackup',          // [wrong, correct] -> whitelist semantics
+    'pinSkipTrust',       // RCP-only: 'skip' + wrong pin
+    'pinUntrustedTrust',  // RCP-only: 'system' + correct pin
   ];
 
   /** Cards contributed to the comparison UI (NSC group, appended last). */
@@ -90,6 +96,54 @@ export class NscSuite {
         netKit: NscNetKit.nscTrustCallback,
         rcp: NscRcp.nscTrustCallback,
         axios: NscAxios.nscTrustCallback,
+      },
+      {
+        key: 'pinSpki',
+        title: '证书锁定: 正确 SPKI pin (信任正常)',
+        desc: 'pin = 服务器公钥(SPKI)的 SHA-256 base64，同时信任正常（RCP remoteValidation={content} / caData / caPath）。用于确认 publicKeyHash 的摘要语义确实是公钥摘要。',
+        netKit: NscNetKit.pinSpki,
+        rcp: NscRcp.pinSpki,
+        axios: () => NscAxios.pinSpki(filesDir),
+      },
+      {
+        key: 'pinWrong',
+        title: '证书锁定: 错误 pin (信任正常)',
+        desc: '信任正常但 pin 为错误摘要。若失败 → pinning 在信任校验之外被强制执行（AND 语义）；若成功 → pinning 未生效。',
+        netKit: NscNetKit.pinWrong,
+        rcp: NscRcp.pinWrong,
+        axios: () => NscAxios.pinWrong(filesDir),
+      },
+      {
+        key: 'pinCertHash',
+        title: '证书锁定: 整证书摘要 (语义探针)',
+        desc: 'pin 用整张 DER 证书的 SHA-256（而非公钥摘要）。用于判定实现是按公钥取摘要还是按整证书取摘要——文档口径是公钥。',
+        netKit: NscNetKit.pinCertHash,
+        rcp: NscRcp.pinCertHash,
+        axios: () => NscAxios.pinCertHash(filesDir),
+      },
+      {
+        key: 'pinBackup',
+        title: '证书锁定: pin 数组 [错误, 正确]',
+        desc: 'pin 传数组且只有一项匹配。成功即白名单语义（任一命中即通过），这也是文档建议"始终配置至少一个备用公钥"的前提。',
+        netKit: NscNetKit.pinBackup,
+        rcp: NscRcp.pinBackup,
+        axios: () => NscAxios.pinBackup(filesDir),
+      },
+      {
+        key: 'pinSkipTrust',
+        title: 'NSC × RCP 组合: remoteValidation=\'skip\' + 错误 pin',
+        desc: 'RCP 独有组合：跳过信任校验但 pin 错误。若失败 → pinning 独立于信任判定（不受 skip 影响）；若成功 → pinning 从属于 remoteValidation。',
+        netKit: NscNetKit.pinSkipTrust,
+        rcp: NscRcp.pinSkipTrust,
+        axios: NscAxios.pinSkipTrust,
+      },
+      {
+        key: 'pinUntrustedTrust',
+        title: 'NSC × RCP 组合: 不受信链 + 正确 pin',
+        desc: 'RCP 独有组合：remoteValidation=\'system\'（自签 CA 不受信）但 pin 正确。若失败 → 信任校验与 pinning 是 AND 关系（pin 不能替代信任锚点）；若成功 → pin 可救不受信链。',
+        netKit: NscNetKit.pinUntrustedTrust,
+        rcp: NscRcp.pinUntrustedTrust,
+        axios: NscAxios.pinUntrustedTrust,
       },
     ];
   }

@@ -15,6 +15,7 @@ RCP 自身的安全配置（`rcp.SecurityConfiguration`）与系统网络安全�
 |---|---|---|
 | **TLS 信任** | NSC 的 `trust-anchors` 对 RCP **零作用**；RCP 只认自己的 `remoteValidation` | RCP 自身配置 |
 | **明文 HTTP** | RCP 无明文字段，明文**只能**由 NSC 决定；且 NSC 内部 **组件开关 > 全局开关** | NSC |
+| **证书锁定 (pin)** | 三方各自机制；RCP 只认自己的 `certificatePinning`，且与 `remoteValidation` 是 **AND**；NSC 的静态 `pin-set` 对 RCP 同样**零作用** | 见 §5.3 |
 
 ## 2. 模块地图
 
@@ -26,6 +27,7 @@ ets/
 │   ├── NscRcp.ets               # RCP column: 6 scenarios + 5 session builders
 │   ├── NscNetKit.ets            # Network Kit column: control + N/A placeholders
 │   ├── NscAxios.ets             # axios column: control + N/A placeholders
+│   ├── NscPins.ets              # pin digests of the mock cert (recompute: npm run pins)
 │   └── NscEnv.ets               # OS/API-level stamp (results carry their own version)
 ├── netkit/NetKitScenarios.ets   # remaining scenarios (NSC excluded)
 ├── rcp/RcpScenarios.ets         # remaining scenarios (NSC excluded)
@@ -49,6 +51,19 @@ ets/
 
 `nscTrustSkip` / `nscTrustCallback` 是 RCP 独有能力，Network Kit/axios 列返回
 `N/A — 无对应能力`（用 `ScenarioResult(true, ...)` 占位，不是失败）。
+
+证书锁定组（6 张）：
+
+| # | key | 验证点 | 期望（提交版配置） |
+|---|---|---|---|
+| 7 | `pinSpki` | `publicKeyHash` 的摘要语义 = 公钥(SPKI) SHA-256 | 三方 200 |
+| 8 | `pinWrong` | pinning 是否在信任之外强制执行 | 三方 FAIL（2300090 / 1007900090） |
+| 9 | `pinCertHash` | 用整证书摘要作 pin（语义探针） | 三方 FAIL |
+| 10 | `pinBackup` | pin 数组 = 白名单（任一命中即通过） | 三方 200 |
+| 11 | `pinSkipTrust` | RCP：`'skip'` + 错误 pin | RCP **FAIL** → pinning 独立于信任判定 |
+| 12 | `pinUntrustedTrust` | RCP：`'system'` + 正确 pin | RCP **FAIL(1007900060)** → pin 不能替代信任 |
+
+自检总计 **36 行** = 12 场景 × 3 框架（外加 ENV/DONE）。
 
 ## 4. 如何运行
 
@@ -99,11 +114,91 @@ UI 上每张卡片三列按钮（Network Kit / RCP / axios）独立可点，用�
 | `nscTrustCa` | 三方 | 200 | ✅ 三方 200 | |
 | `nscTrustSkip` | rcp | 200 | ✅ 200 | |
 | `nscTrustCallback` | rcp | FAIL | ✅ FAIL 1007900060 | |
-| `nscCleartext` | 三方 | 见 §7 变体 | ✅ 三方 200（提交版配置） | |
+| `nscCleartext` | 三方 | 见 §8 变体 | ✅ 三方 200（提交版配置） | |
+| `pinSpki` | 三方 | 200 | ✅ 三方 200 | |
+| `pinWrong` | 三方 | FAIL | ✅ FAIL（2300090 / 1007900090） | |
+| `pinCertHash` | 三方 | FAIL | ✅ FAIL | |
+| `pinBackup` | 三方 | 200 | ✅ 三方 200 | |
+| `pinSkipTrust` | rcp | FAIL | ✅ FAIL 1007900090 | |
+| `pinUntrustedTrust` | rcp | FAIL | ✅ FAIL 1007900060 | |
 
-汇总：`ran=18 pass=15`（3 个期望 FAIL）。
+汇总：`ran=36 pass=25`（11 个期望 FAIL/N-A 组合；不带 pin-set 的提交版配置）。
 
-## 6. 跨版本复验（手工，系统升级后做一次）
+## 6. 证书锁定（pin）关系与优先级
+
+### A. RCP：`remoteValidation` × `certificatePinning`（运行时，无需重构建）
+
+| 场景 | Network Kit | RCP | axios | 读出的规则 |
+|---|---|---|---|---|
+| `pinSpki`（正确 SPKI pin + 信任正常） | 200 | 200 | 200 | `publicKeyHash` = **公钥(SPKI) 的 SHA-256 base64** |
+| `pinWrong`（错误 pin + 信任正常） | ❌ 2300090 | ❌ 1007900090 | ❌ 2300090 | pinning **在信任之外强制执行** |
+| `pinCertHash`（整证书摘要作 pin） | ❌ 2300090 | ❌ 1007900090 | ❌ 2300090 | 摘要取**公钥**，不是整证书 |
+| `pinBackup`（`[错误, 正确]`） | 200 | 200 | 200 | pin 数组 = **白名单**（任一命中即通过）→ 备用公钥可用 |
+| `pinSkipTrust`（RCP `'skip'` + 错误 pin） | N/A | ❌ 1007900090 | N/A | **pinning 独立于信任判定**：`'skip'` 只关链校验，不关 pinning |
+| `pinUntrustedTrust`（RCP `'system'` + 正确 pin） | N/A | ❌ 1007900060 | N/A | **pin 不能替代信任锚点**：信任与 pinning 是 **AND** |
+
+结论（RCP）：`remoteValidation` 决定"链是否可信"，`certificatePinning` 决定"公钥是否为预期"，
+**两者是 AND 关系**——任一方不通过即请求失败；且 `'skip'` 只放弃前者，放弃不了后者。
+错误码：RCP `1007900090 SSL public key does not match pinned public key`；
+Network Kit/axios `2300090 Specified pinned public key did not match`。
+
+### B. NSC：`trust-anchors` × `pin-set`（静态，需 build-variant）
+
+静态 `pin-set` 写在 `domain-config[]` 里（`pin[].digest-algorithm: "sha256"` + `digest`，
+可选 `expiration`）。实测（变体见 §8）：
+
+| 变体 | domain `trust-anchors` | `pin-set` | `nscTrust`（无代码级 CA） | 带正确 `caData` 的请求 |
+|---|---|---|---|---|
+| V3 | ✅ mock CA | ✅ 正确、未过期 | Network Kit/axios **200** | 200 |
+| V4 | ✅ mock CA | ❌ 错误 | **FAIL 2300090**（pin 不匹配） | **FAIL 2300090**（caData 救不了） |
+| V5 | ❌ 无 | ✅ 正确 | **FAIL 2300060**（链不受信） | pin 生效，动态 pin 被覆盖 |
+| V6 | ✅ mock CA | ❌ 错误但 **expiration 已过期** | **200**（过期即不锁定） | 动态 pin 恢复生效 |
+
+结论（NSC）：`trust-anchors`（链是否可信）与 `pin-set`（公钥是否匹配）**也是 AND**，
+且 **`pin-set` 不能替代 `trust-anchors`**（V5：pin 正确但链不受信 → 仍失败，
+且错误码是信任类 `2300060` 而非 pin 类 `2300090`）；
+`expiration` 到期后 pinning **整体失效**（V6）——这正是官方文档提示的安全取舍。
+
+### C. 静态 `pin-set` 与动态 `certificatePinning` 谁优先（新发现）
+
+这是文档没有直说、靠变体实测才能确定的一条：**域级静态 `pin-set`（生效中）完全覆盖
+请求级动态 `certificatePinning`**——动态 pin 根本不参与判定。
+
+| 静态 `pin-set` | 请求级 `certificatePinning` | 实测结果 | 说明 |
+|---|---|---|---|
+| 无 | 正确 | 200 | 动态 pin 正常工作 |
+| 无 | 错误 | FAIL 2300090 | 动态 pin 生效 |
+| 正确、未过期 | **错误** | **200** | 静态 pin 命中 → 动态错误 pin 被忽略 |
+| 错误、未过期 | **正确** | **FAIL 2300090** | 静态 pin 不匹配 → 动态正确 pin 也救不了 |
+| 正确、未过期 | `[错误, 正确]` | 200 | 仍是静态 pin 的结论 |
+| 错误、未过期 | `[错误, 正确]` | FAIL 2300090 | 同上 |
+| 错误但已过期 | 正确 | 200 | 过期 → 静态视同不存在，动态恢复生效 |
+| 错误但已过期 | 错误 | FAIL 2300090 | 同上 |
+
+> 判定逻辑：**不是 AND、也不是 union**（AND 会让 V3 的动态错误 pin 失败；union 会让
+> V4 的动态正确 pin 通过）。唯一与全部 8 行实测一致的模型是"**静态优先覆盖**"。
+
+⚠️ 实践含义：一旦在 `network_config.json` 里配了 `pin-set`，代码里的
+`certificatePinning` 对该域名**不再起作用**（排查"我明明配了 pin 为什么不生效"时先看这里）。
+
+### D. RCP 对 NSC `pin-set` 的遵循程度
+
+V3–V6 四个变体里，**RCP 列的结果与提交版基线逐行一致**（`pinSpki` 200、`pinWrong`
+FAIL 1007900090、`nscTrust` FAIL 1007900060…）→ **RCP 完全忽略 NSC 的 `pin-set`**，
+与它忽略 NSC `trust-anchors` 一致。RCP 的安全配置遵循度总结：
+**`trust-anchors` 忽略、`pin-set` 忽略；只有 `component-config` 的明文开关对它生效。**
+
+### E. pin 值怎么算（证书轮换后必须更新）
+
+```bash
+cd mock-server && npm run pins        # 打印 SPKI / 整证书两种摘要
+# 把 SPKI pin 填进 network-compare/.../nsc/NscPins.ets
+```
+
+`digest` / `publicKeyHash` = `base64(sha256(SubjectPublicKeyInfo))`（**不是**整证书摘要）。
+证书重新生成后不同步 `NscPins.ets` 与 `pin-set` 会直接导致全部 pin 场景失败。
+
+## 7. 跨版本复验（手工，系统升级后做一次）
 
 **前置**：mock server 已启动（`cd mock-server && npm start`）；模拟器/真机已连通；
 `AppConfig.host` 指向可达地址（模拟器默认 `10.0.2.2`）。
@@ -124,7 +219,7 @@ UI 上每张卡片三列按钮（Network Kit / RCP / axios）独立可点，用�
 > ⚠️ 证书轮换會影响全部 HTTPS 场景：`mock-server` 重新生成证书后必须同步
 > `AppConfig.MOCK_CA_PEM` 与 `resfile/mock-ca/`（见 `AGENTS.md`「HTTPS 自签名证书」）。
 
-## 7. 明文变体实验（build-variant）
+## 8. 变体实验（build-variant：明文 + 证书锁定）
 
 明文的优先级无法在运行时切换——`network_config.json` 随 HAP 打包，必须改配置重构建。
 
@@ -134,10 +229,20 @@ UI 上每张卡片三列按钮（Network Kit / RCP / axios）独立可点，用�
 | V1 | `false` | `false` | 仅 RCP 200；netkit/axios 报 **2300997** |
 | V2 | `false` | `true` | 三方全拦；RCP 报 **1007900201** |
 
-流程：改 JSON → `devecocli build` → `run --skip-build --uninstall` → 点自检 →
-读 `nscCleartext` 行 → **`git checkout -- <config>` 还原并重建**（别忘了还原）。
+**证书锁定变体**（`domain-config` 内加 `pin-set`，digest 用 `npm run pins` 的值）：
 
-## 8. 已知坑
+| 变体 | domain `trust-anchors` | `pin-set` | 结果 |
+|---|---|---|---|
+| V3 | mock CA | 正确，`expiration: 2035-12-31` | `nscTrust` 200；**动态错误 pin 被覆盖为 200** |
+| V4 | mock CA | 错误 | `nscTrust`/`nscTrustCa`/`pinSpki`/`pinBackup` 全 FAIL 2300090 |
+| V5 | **移除** | 正确 | `nscTrust` FAIL 2300060（pin 救不了不受信链） |
+| V6 | mock CA | 错误但 `expiration: 2020-01-01`（已过期） | `nscTrust` 200；动态 pin 恢复生效 |
+
+流程：改 JSON → `devecocli build` → `run --skip-build --uninstall` → 点自检 →
+读 `nscCleartext` / `nscTrust` / `pin*` 行 → **`git checkout -- <config>` 还原并重建**
+（别忘了还原）。
+
+## 9. 已知坑
 
 1. **不要并行执行 hdc/uitest**：两个 `uitest` 会话互相阻塞，双方都会超时
    （曾导致驱动脚本全部任务报 `CARD NOT FOUND`）。
@@ -149,3 +254,7 @@ UI 上每张卡片三列按钮（Network Kit / RCP / axios）独立可点，用�
    "Default is 'system'"），所以"缺省"与"显式 'system'"应当同结论；若不同，说明有 bug。
 5. **ArkTS 类型推断**：把 helper 返回值赋给局部变量时需显式标注
    （`const config: AxiosRequestConfig = ...`），否则 `arkts-no-any-unknown` 编译失败。
+6. **pin 值随证书失效**：mock 证书重新生成后，`NscPins.ets` 与任何 `pin-set` 都必须
+   用 `cd mock-server && npm run pins` 重算，否则 pin 场景全红。
+7. **`pin-set` 会静默压制代码里的 `certificatePinning`**（生效中的域级静态 pin 优先，
+   见 §6-C）：排查 pin 不生效时先确认 NSC 里有没有配 `pin-set`。

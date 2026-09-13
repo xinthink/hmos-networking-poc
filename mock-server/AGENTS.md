@@ -51,6 +51,11 @@ Node.js Mock Server，为 `network-compare` App 提供 HTTP/1.1 与 HTTP/2 双�
 - ⚠️ **重新生成证书后，必须把 `cert.pem` 内容同步到
   `network-compare/entry/src/main/ets/common/AppConfig.ets` 的 `MOCK_CA_PEM`**，
   否则 App 的 HTTPS 请求会因证书不受信任而失败。
+- **证书锁定（pin）值同样随证书失效**：`npm run pins`（`gen-pins.mjs`）打印
+  `base64(sha256(SubjectPublicKeyInfo))` 与整证书摘要两种值；前者才是
+  `certificatePinning.publicKeyHash` / NSC `pin-set.digest` 需要填的（整证书摘要会被拒，
+  已实测）。改证书后需同步 `network-compare/entry/src/main/ets/nsc/NscPins.ets`
+  与任何 `pin-set` 配置。
 
 ## 验证
 

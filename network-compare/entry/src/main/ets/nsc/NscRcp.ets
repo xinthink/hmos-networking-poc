@@ -20,6 +20,7 @@ import { networkSecurity } from '@kit.NetworkKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { AppConfig } from '../common/AppConfig';
 import { ScenarioResult } from '../model/ScenarioResult';
+import { NscPins } from './NscPins';
 
 /** Endpoint used by every TLS probe in this suite. */
 function httpsProtocolUrl(): string {
@@ -58,7 +59,7 @@ export class NscRcp {
   /** `remoteValidation: 'skip'` — bypasses every certificate check. */
   private static newSkipSession(): rcp.Session {
     const security: rcp.SecurityConfiguration = { remoteValidation: 'skip' };
-    const config: rcp.Configuration = { security: security };
+      const config: rcp.Configuration = { security: security };
     return rcp.createSession({ requestConfiguration: config });
   }
 
@@ -208,5 +209,132 @@ export class NscRcp {
     } finally {
       session.close();
     }
+  }
+
+  // ---- certificate pinning (remoteValidation x certificatePinning) ------------
+  //
+  // `remoteValidation` decides whether the server chain is TRUSTED.
+  // `certificatePinning` additionally requires the server's public key to match a
+  // known digest. The scenarios below establish how the two combine.
+
+  /** One pin entry (kind is fixed to 'public-key' by the API). */
+  private static pin(hash: string): rcp.CertificatePinning {
+    return { kind: 'public-key', publicKeyHash: hash, hashAlgorithm: 'SHA-256' };
+  }
+
+  /** Session with a code-level CA plus one or more pins. */
+  private static newCaPinSession(pin: rcp.CertificatePinning): rcp.Session {
+    const security: rcp.SecurityConfiguration = {
+      remoteValidation: { content: AppConfig.MOCK_CA_PEM },
+      certificatePinning: pin,
+    };
+    const config: rcp.Configuration = { security: security };
+    return rcp.createSession({ requestConfiguration: config });
+  }
+
+  /** Session with a code-level CA plus a pin LIST (backup-pin semantics). */
+  private static newCaPinListSession(pins: rcp.CertificatePinning[]): rcp.Session {
+    const security: rcp.SecurityConfiguration = {
+      remoteValidation: { content: AppConfig.MOCK_CA_PEM },
+      certificatePinning: pins,
+    };
+    const config: rcp.Configuration = { security: security };
+    return rcp.createSession({ requestConfiguration: config });
+  }
+
+  /** Session that skips trust validation but still pins. */
+  private static newSkipPinSession(pin: rcp.CertificatePinning): rcp.Session {
+    const security: rcp.SecurityConfiguration = {
+      remoteValidation: 'skip',
+      certificatePinning: pin,
+    };
+    const config: rcp.Configuration = { security: security };
+    return rcp.createSession({ requestConfiguration: config });
+  }
+
+  /** Session that trusts only the device CA store (untrusted here) but pins correctly. */
+  private static newSystemPinSession(pin: rcp.CertificatePinning): rcp.Session {
+    const security: rcp.SecurityConfiguration = {
+      remoteValidation: 'system',
+      certificatePinning: pin,
+    };
+    const config: rcp.Configuration = { security: security };
+    return rcp.createSession({ requestConfiguration: config });
+  }
+
+  /**
+   * Pin probe A: correct SPKI pin + valid code-level trust.
+   * Establishes that `publicKeyHash` really is the SPKI digest. Expected: 200.
+   */
+  static async pinSpki(): Promise<ScenarioResult> {
+    return NscRcp.probe(NscRcp.newCaPinSession(NscRcp.pin(NscPins.SPKI_SHA256)),
+      'SPKI pin 匹配（HTTPS OK）',
+      'SPKI pin 被拒（意外：摘要语义可能不是公钥）',
+      'remoteValidation={content} + certificatePinning=SPKI sha256');
+  }
+
+  /**
+   * Pin probe B: valid trust but WRONG pin.
+   * If this fails, pinning is enforced in addition to trust (AND semantics).
+   * Expected: FAIL.
+   */
+  static async pinWrong(): Promise<ScenarioResult> {
+    return NscRcp.probe(NscRcp.newCaPinSession(NscRcp.pin(NscPins.WRONG)),
+      '错误 pin 被放行（意外：pinning 未生效）',
+      '错误 pin 被拒：pinning 在信任之外独立强制执行（AND）',
+      'remoteValidation={content} + certificatePinning=错误摘要');
+  }
+
+  /**
+   * Digest-semantics probe: pin the whole-certificate hash instead of the SPKI
+   * hash. Expected: FAIL (documents that `publicKeyHash` is the SPKI digest, not
+   * the certificate digest).
+   */
+  static async pinCertHash(): Promise<ScenarioResult> {
+    return NscRcp.probe(NscRcp.newCaPinSession(NscRcp.pin(NscPins.CERT_SHA256)),
+      '整证书摘要被放行（说明实现按整证书取摘要，而非公钥）',
+      '整证书摘要被拒：publicKeyHash 取的是公钥(SPKI)摘要',
+      'remoteValidation={content} + certificatePinning=整证书 sha256');
+  }
+
+  /**
+   * Backup-pin semantics: a list where one entry is wrong and one is correct.
+   * Success means pins are a whitelist ("any match passes"), which is what makes
+   * the documented "always include a backup public key" advice work.
+   * Expected: 200.
+   */
+  static async pinBackup(): Promise<ScenarioResult> {
+    const pins: rcp.CertificatePinning[] = [
+      NscRcp.pin(NscPins.WRONG),
+      NscRcp.pin(NscPins.SPKI_SHA256),
+    ];
+    return NscRcp.probe(NscRcp.newCaPinListSession(pins),
+      'pin 数组命中其一即通过（白名单语义）',
+      'pin 数组未命中（意外：数组语义不是白名单）',
+      'certificatePinning=[错误摘要, SPKI sha256]');
+  }
+
+  /**
+   * Combination priority #1: `remoteValidation: 'skip'` + WRONG pin.
+   * Tells whether 'skip' also disables pinning (then pinning is subordinate to
+   * remoteValidation) or not (then pinning is an independent constraint).
+   */
+  static async pinSkipTrust(): Promise<ScenarioResult> {
+    return NscRcp.probe(NscRcp.newSkipPinSession(NscRcp.pin(NscPins.WRONG)),
+      "'skip' 让错误 pin 失效：pinning 从属于 remoteValidation",
+      "'skip' 下错误 pin 仍被拒：pinning 独立于信任判定",
+      "remoteValidation='skip' + certificatePinning=错误摘要");
+  }
+
+  /**
+   * Combination priority #2: untrusted chain (`'system'`) + CORRECT pin.
+   * Tells whether a matching pin can rescue a chain that trust validation
+   * rejects (pin as substitute for a trust anchor) or not (AND semantics).
+   */
+  static async pinUntrustedTrust(): Promise<ScenarioResult> {
+    return NscRcp.probe(NscRcp.newSystemPinSession(NscRcp.pin(NscPins.SPKI_SHA256)),
+      '正确 pin 救了不受信链：pin 可替代信任锚点',
+      '正确 pin 也救不了不受信链：信任校验与 pinning 是 AND 关系',
+      "remoteValidation='system' + certificatePinning=SPKI sha256（自签 CA 不在系统库）");
   }
 }

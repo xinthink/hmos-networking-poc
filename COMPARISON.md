@@ -223,6 +223,37 @@ Axios 实测全部 11 个场景通过（`AxiosScenarios.ets`），以下是它�
   置 true 后才被拦截（1007900201）。
 - 即：**明文看 NSC（组件开关），信任看 RCP 自身配置**。
 
+
+
+**③ trust-anchors 与 pin-set（证书锁定）的关系（专项实测）**
+
+官方文档把 SSL Pinning 描述为"在 CA 信任之外再绑定服务器公钥"，实测确认二者是
+**AND** 关系，且静态/动态 pin 之间存在覆盖关系：
+
+| 组合 | 链信任 | pin 匹配 | 结果 |
+|---|---|---|---|
+| `trust-anchors` + `pin-set`（正确、未过期） | ✅ | ✅ | 200 |
+| `trust-anchors` + `pin-set`（错误） | ✅ | ❌ | ❌ 2300090（**代码级 `caData` 也救不了**） |
+| **无** `trust-anchors` + `pin-set`（正确） | ❌ | ✅ | ❌ 2300060（**pin 不能替代信任锚点**） |
+| `trust-anchors` + `pin-set`（错误但 `expiration` 已过期） | ✅ | 不生效 | 200（过期即不锁定） |
+
+**静态 `pin-set` 覆盖动态 `certificatePinning`**（8 种组合实测，排除 AND 与 union 两种假设）：
+
+| 静态 `pin-set` | 请求级 `certificatePinning` | 结果 |
+|---|---|---|
+| 无 | 正确 / 错误 | 200 / FAIL 2300090 |
+| 正确、未过期 | **错误** | **200**（动态 pin 被忽略） |
+| 错误、未过期 | **正确** | **FAIL 2300090**（动态 pin 也救不了） |
+| 错误但已过期 | 正确 / 错误 | 200 / FAIL（动态 pin 恢复生效） |
+
+→ 一旦 NSC 里配了 `pin-set`，代码中的 `certificatePinning` 对该域名**不再起作用**。
+
+**RCP 侧（`remoteValidation` × `certificatePinning`）**：同样是 **AND**，且 `'skip'`
+只放弃链校验、**不放弃 pinning**（`'skip'` + 错误 pin 仍报 `1007900090`）；
+pin 正确也救不了不受信链（`1007900060`）；pin 数组为白名单语义（任一命中即通过）。
+**RCP 完全忽略 NSC 的 `pin-set`**（与忽略 `trust-anchors` 一致）——RCP 的安全配置遵循度是
+"trust-anchors 忽略、pin-set 忽略，只有 `component-config` 明文开关生效"。
+
 > 实现位置：**独立模块** `network-compare/entry/src/main/ets/nsc/`
 > （`NscSuite` / `NscRcp` / `NscNetKit` / `NscAxios` / `NscEnv`）。
 > 套件说明、逐版本结果矩阵、**系统升级后的手工复验流程**见

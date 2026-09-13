@@ -6,7 +6,8 @@
   "main": "server.mjs",
   "scripts": {
     "start": "node server.mjs",
-    "certs": "node gen-certs.mjs"
+    "certs": "node gen-certs.mjs",
+    "pins": "node gen-pins.mjs"
   },
   "engines": {
     "node": ">=18"
