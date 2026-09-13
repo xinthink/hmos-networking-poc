@@ -10,10 +10,11 @@ Node.js Mock Server，为 `network-compare` App 提供 HTTP/1.1 与 HTTP/2 双�
 |------|------|------|
 | 8080 | 明文 `http://` | HTTP/1.1 only |
 | 8443 | TLS/ALPN `https://`（自签名证书） | HTTP/2 或 HTTP/1.1（按客户端 ALPN 协商） |
+| 9443 | TLS/ALPN `https://`（由「用户 CA」`nsc-user-ca` 签发） | 同上；**仅用于 NSC 用户 CA / MITM 防护实验**（`npm run user-ca` 生成，不存在则跳过该监听） |
 
 同一 URL 走 8443 时，支持 h2 的客户端自动协商到 HTTP/2，否则回退 HTTP/1.1 —— 这正是
 对比两套框架协议行为的核心手段。端口可用环境变量覆盖：`MOCK_HTTP1_PORT`、
-`MOCK_HTTPS_PORT`、`MOCK_HOST`。
+`MOCK_HTTPS_PORT`、`MOCK_USER_CA_PORT`、`MOCK_HOST`。
 
 ## 端点清单
 
@@ -56,6 +57,21 @@ Node.js Mock Server，为 `network-compare` App 提供 HTTP/1.1 与 HTTP/2 双�
   `certificatePinning.publicKeyHash` / NSC `pin-set.digest` 需要填的（整证书摘要会被拒，
   已实测）。改证书后需同步 `network-compare/entry/src/main/ets/nsc/NscPins.ets`
   与任何 `pin-set` 配置。
+
+## 用户 CA 实验材料（`npm run user-ca`）
+
+`gen-user-ca.mjs` 生成一张独立 CA（`certs/user-ca.pem`，CA:TRUE）与由它签发的服务器证书
+（`certs/user-server.pem`，SAN 与主证书相同），并把 CA 放到 `:9443`。用途：验证 NSC 的
+`trust-global-user-ca` / `trust-current-user-ca` 开关对 RCP 是否生效——该链**不在** app
+trust-anchors、**不在**系统库，只有设备**用户 CA 库**能救它。公钥证书入库，私钥 gitignore。
+
+```bash
+npm run user-ca     # 生成（已存在则跳过；--force 覆盖）
+# 打印可直接粘贴进 AppConfig.ets 的 USER_CA_PEM
+```
+
+⚠️ 把 CA 装进设备用户证书库的路径见 `../network-compare/NSC-VERIFICATION.md` §6-G
+（应用侧 API 在模拟器返回 29700004，需走证书管理 UI）。
 
 ## 验证
 

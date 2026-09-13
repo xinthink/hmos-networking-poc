@@ -279,6 +279,27 @@ CA 目录同时含 `cert.pem` 与 `<hash>.0`。官方文档称 RCP 也可通过 
 与本实测冲突——**真机复测、主机名域匹配、CA 目录形态**三项待验证，清单见
 [`network-compare/NSC-VERIFICATION.md`](network-compare/NSC-VERIFICATION.md) §10。
 
+**⑤ 用户安装的 CA（中间人防护）——RCP 遵守 opt-out**
+
+威胁模型：用户/代理工具把 CA 装进设备**用户 CA 库**并签发服务器证书（Charles/Fiddler 式抓包）。
+实验用一张独立 CA（`npm run user-ca`）签发 `:9443` 的服务器证书（不在 app trust-anchors、不在系统库）：
+
+| 阶段 | 用户 CA 已装 | 顶层 `trust-*-user-ca` | Network Kit | axios | RCP |
+|---|---|---|---|---|---|
+| ① 阴性对照 | ❌ | 缺省 | ❌ 2300060 | ❌ 2300060 | ❌ 1007900060 |
+| ② 判据 | ✅ | 缺省（信任） | ✅ 200 | ✅ 200 | ✅ **200** |
+| ③ opt-out | ✅ | 都 `false` | ❌ 2300060 | ❌ 2300060 | ❌ **1007900060** |
+
+- **RCP 默认也信任用户安装的 CA**（②）→ 不配 opt-out 时，设备上装了代理 CA，RCP 流量同样可被解密。
+- **RCP 遵守 `trust-global-user-ca` / `trust-current-user-ca = false`**（③ 由 200 变失败，
+  而 ②→③ 唯一变化就是这两个顶层 key）→ **NSC 可以保护 RCP 免受"用户 CA 型中间人"攻击**。
+- 这是 RCP **唯一**遵守的 NSC 信任类开关：`trust-anchors`、`pin-set` 均被忽略。
+  规律：**RCP 遵守 NSC 中"收紧性"开关（禁用明文、拒绝用户 CA），忽略"补充性"配置
+  （app 级信任锚点、静态 pin-set）**。
+- ⚠️ 两个坑：这两个 key 是 `network-security-config` 的**兄弟节点**（顶层）；本模拟器上
+  应用侧 `openInstallCertificateDialog` 返回 `29700004`，装 CA 必须走证书管理 UI
+  （完整路径见 `NSC-VERIFICATION.md` §6-G）。
+
 **复现方式**
 
 ```bash

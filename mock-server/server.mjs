@@ -33,6 +33,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HTTP1_PORT = Number(process.env.MOCK_HTTP1_PORT ?? 8080);
 const HTTPS_PORT = Number(process.env.MOCK_HTTPS_PORT ?? 8443);
+const USER_CA_PORT = Number(process.env.MOCK_USER_CA_PORT ?? 9443);
 const HOST = process.env.MOCK_HOST ?? '0.0.0.0';
 
 const certPath = path.join(__dirname, 'certs', 'cert.pem');
@@ -361,5 +362,35 @@ const tls = http2.createSecureServer(
 tls.listen(HTTPS_PORT, HOST, () => {
   console.log(`[TLS/ALPN] listening on https://${HOST}:${HTTPS_PORT} (HTTP/2 + HTTP/1.1)`);
 });
+
+// Third listener: TLS with a cert signed by the "user-installed CA" (gen-user-ca.mjs).
+// Used by the NSC user-CA experiment — this chain is trusted ONLY if the device's
+// user CA store is consulted, i.e. it must NOT validate against the app's
+// trust-anchors / the system store.
+const userCaKeyPath = path.join(__dirname, 'certs', 'user-server.key');
+const userCaCertPath = path.join(__dirname, 'certs', 'user-server.pem');
+
+if (fs.existsSync(userCaKeyPath) && fs.existsSync(userCaCertPath)) {
+  const userTls = http2.createSecureServer(
+    {
+      key: fs.readFileSync(userCaKeyPath),
+      cert: fs.readFileSync(userCaCertPath),
+      allowHTTP1: true,
+      ALPNProtocols: ['h2', 'http/1.1'],
+    },
+    (req, res) => {
+      route(req, res).catch((err) => {
+        console.error('[user-ca tls] error', err);
+        json(res, 500, { error: String(err?.message ?? err) });
+      });
+    },
+  );
+
+  userTls.listen(USER_CA_PORT, HOST, () => {
+    console.log(`[user-ca TLS/ALPN] listening on https://${HOST}:${USER_CA_PORT} (cert signed by nsc-user-ca)`);
+  });
+} else {
+  console.log(`[user-ca TLS/ALPN] skipped — run: npm run user-ca (to enable :${USER_CA_PORT})`);
+}
 
 process.on('SIGINT', () => process.exit(0));

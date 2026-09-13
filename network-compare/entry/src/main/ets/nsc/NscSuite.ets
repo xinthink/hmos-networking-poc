@@ -44,6 +44,8 @@ export class NscSuite {
     'pinBackup',          // [wrong, correct] -> whitelist semantics
     'pinSkipTrust',       // RCP-only: 'skip' + wrong pin
     'pinUntrustedTrust',  // RCP-only: 'system' + correct pin
+    'userCaTrust',        // user-installed CA (MITM proxy CA) honoured?
+    'userCaByCodeCa',     // positive control: same chain via code-level CA
   ];
 
   /** Cards contributed to the comparison UI (NSC group, appended last). */
@@ -144,6 +146,22 @@ export class NscSuite {
         netKit: NscNetKit.pinUntrustedTrust,
         rcp: NscRcp.pinUntrustedTrust,
         axios: NscAxios.pinUntrustedTrust,
+      },
+      {
+        key: 'userCaTrust',
+        title: '用户安装的 CA: 是否被信任 (MITM 防护)',
+        desc: '设备装了"用户自己安装的 CA"（Charles/Fiddler 那类代理 CA）时，:9443 的服务器证书正是由该 CA 签发（不在系统库、不在 app trust-anchors 里）。本场景不带任何代码级 CA：成功即说明该框架信任用户 CA，可被这类中间人解密。NSC 可用顶层 trust-global-user-ca / trust-current-user-ca = false 拒绝此类 CA。',
+        netKit: NscNetKit.userCaTrust,
+        rcp: NscRcp.userCaTrust,
+        axios: NscAxios.userCaTrust,
+      },
+      {
+        key: 'userCaByCodeCa',
+        title: '用户安装的 CA: 代码级信任 (对照)',
+        desc: '同一 :9443 端点，但把 user CA 作为代码级 CA（caData / remoteValidation={content} / caPath）。必须成功——否则说明端点或证书链本身有问题，上一个场景的失败就不能归因于 NSC。',
+        netKit: NscNetKit.userCaByCodeCa,
+        rcp: NscRcp.userCaByCodeCa,
+        axios: () => NscAxios.userCaByCodeCa(filesDir),
       },
     ];
   }

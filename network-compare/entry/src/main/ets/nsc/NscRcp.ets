@@ -98,9 +98,9 @@ export class NscRcp {
 
   /** GET /api/protocol over TLS and render the outcome. */
   private static async probe(session: rcp.Session, okSummary: string, failSummary: string,
-                             note: string): Promise<ScenarioResult> {
+                             note: string, url?: string): Promise<ScenarioResult> {
     try {
-      const resp = await session.get(httpsProtocolUrl());
+      const resp = await session.get(url ?? httpsProtocolUrl());
       const body = JSON.parse(resp.toString() ?? '{}') as Record<string, string>;
       const detail =
         `HTTP status : ${resp.statusCode}\n` +
@@ -336,5 +336,48 @@ export class NscRcp {
       '正确 pin 救了不受信链：pin 可替代信任锚点',
       '正确 pin 也救不了不受信链：信任校验与 pinning 是 AND 关系',
       "remoteValidation='system' + certificatePinning=SPKI sha256（自签 CA 不在系统库）");
+  }
+
+  // ---- user-installed CA (the CA a Charles/Fiddler-style proxy installs) ------
+  //
+  // The :9443 listener serves a certificate signed by `user-ca`, which is NOT in
+  // the app trust-anchors and NOT in the system store — it is trusted only if the
+  // device's USER CA store is consulted. NSC can refuse such CAs via the
+  // top-level keys "trust-global-user-ca": false / "trust-current-user-ca": false.
+
+  /** Endpoint whose chain validates only against the user CA. */
+  private static userCaUrl(): string {
+    return `${AppConfig.userCaBase()}/api/protocol`;
+  }
+
+  /**
+   * Core probe: no code-level CA at all, so trust can only come from the device
+   * user CA store. Expected: 200 once the user CA is installed and the NSC
+   * opt-out is absent; FAIL when the device refuses user CAs (or none is installed).
+   */
+  static async userCaTrust(): Promise<ScenarioResult> {
+    return NscRcp.probe(NscRcp.newDefaultSession(),
+      'RCP 信任了用户安装的 CA（可被该 CA 的中间人解密）',
+      'RCP 不信任用户安装的 CA（未被该 CA 中间人穿透）',
+      'no code-level CA; :9443 cert signed by nsc-user-ca (user CA store only)',
+      NscRcp.userCaUrl());
+  }
+
+  /**
+   * Positive control: supply the user CA as a code-level CA. Must succeed,
+   * otherwise the :9443 endpoint or the chain itself is broken and the core
+   * probe above would be meaningless.
+   */
+  static async userCaByCodeCa(): Promise<ScenarioResult> {
+    const security: rcp.SecurityConfiguration = {
+      remoteValidation: { content: AppConfig.USER_CA_PEM },
+    };
+    const config: rcp.Configuration = { security: security };
+    const session = rcp.createSession({ requestConfiguration: config });
+    return NscRcp.probe(session,
+      '代码级信任 user CA 成功（对照：端点与证书链正常）',
+      '代码级信任 user CA 失败（对照失败：端点/证书链有问题，核心探针不可信）',
+      'remoteValidation={content:USER_CA_PEM} against :9443',
+      NscRcp.userCaUrl());
   }
 }

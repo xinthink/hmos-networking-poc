@@ -32,3 +32,7 @@ network-compare/oh-package-lock.json5
 
 # cj-network-compare: stdx .so 运行时库（从 cangjie_stdx target 复制，构建产物）
 cj-network-compare/entry/libs/
+mock-server/certs/user-ca.key
+mock-server/certs/user-server.key
+mock-server/certs/user-ca.srl
+mock-server/certs/.user-ca-info.txt

@@ -5,6 +5,9 @@
  * side by side. The mock server must be running (see mock-server/README).
  */
 import { common } from '@kit.AbilityKit';
+import { util } from '@kit.ArkTS';
+import { certificateManagerDialog } from '@kit.DeviceCertificateKit';
+import { BusinessError } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { AppConfig } from '../common/AppConfig';
 import { ScenarioDef, ScenarioRunner, ScenarioSink } from '../model/ScenarioDef';
@@ -24,6 +27,7 @@ struct Index {
   @State rcpResults: Record<string, string> = {};
   @State axiosResults: Record<string, string> = {};
   @State busy: Record<string, boolean> = {};
+  @State userCaStatus: string = '未安装';
   private filesDir: string = '';
 
   aboutToAppear(): void {
@@ -163,6 +167,34 @@ struct Index {
   }
 
   /**
+   * Install the "user CA" (certs/user-ca.pem) into the DEVICE user CA store via
+   * the certificate manager dialog. This is what a proxy tool does when the user
+   * installs its CA, and it is the precondition for the userCaTrust scenario.
+   * Result is logged with keyword USERCATEST for headless reading.
+   */
+  private async installUserCa(): Promise<void> {
+    const ctx = getContext(this) as common.UIAbilityContext;
+    this.busy = this.copyWith(this.busy, 'installUserca', true);
+    try {
+      const pem: Uint8Array = new util.TextEncoder().encodeInto(AppConfig.USER_CA_PEM);
+      const uri = await certificateManagerDialog.openInstallCertificateDialog(
+        ctx,
+        certificateManagerDialog.CertificateType.CA_CERT,
+        certificateManagerDialog.CertificateScope.CURRENT_USER,
+        pem);
+      this.userCaStatus = `已安装: ${uri}`;
+      hilog.info(0x0000, TAG, 'USERCATEST install OK uri=%{public}s', uri);
+    } catch (e) {
+      const err = e as BusinessError;
+      this.userCaStatus = `安装失败: code=${err.code}`;
+      hilog.info(0x0000, TAG, 'USERCATEST install FAIL code=%{public}d msg=%{public}s',
+        err.code, err.message ?? '');
+    } finally {
+      this.busy = this.copyWith(this.busy, 'installUserca', false);
+    }
+  }
+
+  /**
    * Run the NSC verification suite in one go. The suite itself lives in
    * `ets/nsc/` (NscSuite) — it logs every result to hilog (TAG=NetCompare,
    * keyword NSCTEST, with an ENV line carrying OS + API level) and hands each
@@ -228,6 +260,19 @@ struct Index {
         .onClick(() => {
           this.runSelfTest();
         })
+
+      // Install the user CA (NSC user-CA / MITM experiment precondition)
+      Row({ space: 8 }) {
+        Button(this.busy['installUserca'] ? '安装中 …' : '安装用户 CA 到设备证书库')
+          .layoutWeight(1)
+          .backgroundColor('#C62828')
+          .enabled(!this.busy['installUserca'])
+          .onClick(() => {
+            this.installUserCa();
+          })
+        Text(this.userCaStatus).fontSize(11).fontColor('#666666').layoutWeight(1)
+      }
+      .width('100%')
 
       // Scenario cards
       List({ space: 12 }) {

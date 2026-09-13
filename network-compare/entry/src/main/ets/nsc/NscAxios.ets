@@ -197,4 +197,65 @@ export class NscAxios {
     return new ScenarioResult(true, 'N/A — 无对应能力',
       'axios 无法在不带 caPath 的前提下强制只信系统 CA（NSC trust-anchors 会生效），对应组合仅存在于 RCP。');
   }
+
+  // ---- user-installed CA (see NscRcp.userCaTrust for the rationale) -----------
+
+  private static userCaUrl(): string {
+    return `${AppConfig.userCaBase()}/api/protocol`;
+  }
+
+  /** Core probe: no code-level CA — trust must come from the device user CA store. */
+  static async userCaTrust(): Promise<ScenarioResult> {
+    try {
+      const config: AxiosRequestConfig = NscAxios.baseConfig();
+      config.usingProtocol = http.HttpProtocol.HTTP2;
+      const resp = await axios.get<Record<string, string>, NscAxiosResp, null>(
+        NscAxios.userCaUrl(), config);
+      const ok = resp.status === 200;
+      return new ScenarioResult(ok,
+        ok ? 'axios 信任用户安装的 CA' : 'axios 不信任用户安装的 CA（NSC 生效或未安装）',
+        `HTTP status : ${resp.status}\n` +
+        `note        : no caPath; :9443 cert signed by nsc-user-ca (user CA store only)`,
+        resp.status);
+    } catch (e) {
+      return NscAxios.err('axios 不信任用户安装的 CA（NSC 生效或未安装）', e as NscAxiosErr);
+    }
+  }
+
+  /** Positive control: the same chain with the user CA supplied as code-level caPath. */
+  static async userCaByCodeCa(filesDir: string): Promise<ScenarioResult> {
+    try {
+      const ca = await NscAxios.ensureUserCaFile(filesDir);
+      const config: AxiosRequestConfig = NscAxios.baseConfig();
+      config.usingProtocol = http.HttpProtocol.HTTP2;
+      config.caPath = ca;
+      const resp = await axios.get<Record<string, string>, NscAxiosResp, null>(
+        NscAxios.userCaUrl(), config);
+      const ok = resp.status === 200;
+      return new ScenarioResult(ok,
+        ok ? '代码级信任 user CA 成功（对照）' : '代码级信任 user CA 失败（对照）',
+        `HTTP status : ${resp.status}\nnote        : caPath=${ca} against :9443`,
+        resp.status);
+    } catch (e) {
+      return NscAxios.err('Axios userCaByCodeCa', e as NscAxiosErr);
+    }
+  }
+
+  /** Materialise the user CA PEM for caPath (separate from the mock CA file). */
+  private static userCaFilePath: string = '';
+
+  private static async ensureUserCaFile(filesDir: string): Promise<string> {
+    if (NscAxios.userCaFilePath.length > 0) {
+      return NscAxios.userCaFilePath;
+    }
+    const p = `${filesDir}/user-ca.pem`;
+    const file = fs.openSync(p, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
+    try {
+      fs.writeSync(file.fd, AppConfig.USER_CA_PEM);
+    } finally {
+      fs.closeSync(file);
+    }
+    NscAxios.userCaFilePath = p;
+    return p;
+  }
 }

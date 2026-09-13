@@ -13,6 +13,11 @@
     "requestPermissions": [
       {
         "name": "ohos.permission.INTERNET"
+      },
+      {
+        // Level: normal / system_grant (verified on device) — needed to install the
+        // "user CA" into the device store for the NSC user-CA experiment.
+        "name": "ohos.permission.ACCESS_CERT_MANAGER"
       }
     ],
     "abilities": [

@@ -202,4 +202,53 @@ export class NscNetKit {
     return new ScenarioResult(true, 'N/A — 无对应能力',
       'Network Kit 无法在不带 caData 的前提下强制只信系统 CA（NSC trust-anchors 会生效），对应组合仅存在于 RCP。');
   }
+
+  // ---- user-installed CA (see NscRcp.userCaTrust for the rationale) -----------
+
+  private static userCaUrl(): string {
+    return `${AppConfig.userCaBase()}/api/protocol`;
+  }
+
+  /** Core probe: no code-level CA — trust must come from the device user CA store. */
+  static async userCaTrust(): Promise<ScenarioResult> {
+    const req = http.createHttp();
+    try {
+      const resp = await req.request(NscNetKit.userCaUrl(), NscNetKit.baseOptions());
+      const ok = resp.responseCode === 200;
+      return new ScenarioResult(ok,
+        ok ? 'Network Kit 信任用户安装的 CA' : 'Network Kit 不信任用户安装的 CA（NSC 生效或未安装）',
+        `HTTP status : ${resp.responseCode}\n` +
+        `note        : no caData; :9443 cert signed by nsc-user-ca (user CA store only)`,
+        resp.responseCode);
+    } catch (e) {
+      const err = e as BusinessError;
+      return new ScenarioResult(false,
+        'Network Kit 不信任用户安装的 CA（NSC 生效或未安装）',
+        `失败\ncode=${err.code}\n${err.message}\n` +
+        `note        : no caData; :9443 cert signed by nsc-user-ca`,
+        err.code);
+    } finally {
+      req.destroy();
+    }
+  }
+
+  /** Positive control: the same chain with the user CA supplied as code-level caData. */
+  static async userCaByCodeCa(): Promise<ScenarioResult> {
+    const req = http.createHttp();
+    try {
+      const options = NscNetKit.baseOptions();
+      options.caData = AppConfig.USER_CA_PEM;
+      const resp = await req.request(NscNetKit.userCaUrl(), options);
+      const ok = resp.responseCode === 200;
+      return new ScenarioResult(ok,
+        ok ? '代码级信任 user CA 成功（对照）' : '代码级信任 user CA 失败（对照）',
+        `HTTP status : ${resp.responseCode}\nnote        : caData=USER_CA_PEM against :9443`,
+        resp.responseCode);
+    } catch (e) {
+      const err = e as BusinessError;
+      return ScenarioResult.error('NetworkKit userCaByCodeCa', err as Error);
+    } finally {
+      req.destroy();
+    }
+  }
 }

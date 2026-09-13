@@ -43,6 +43,8 @@ devecocli run --device "Pura 90"                 # 构建+安装+启动（debug 
 | 13 | NSC × RCP: 代码级 CA 覆盖默认 | `remoteValidation={content}` 覆盖默认 `'system'` |
 | 14 | NSC × RCP: `remoteValidation='skip'` | RCP 独有：绕过全部证书校验（Network Kit/Axios 为 N/A） |
 | 15 | NSC × RCP: `ValidationCallback` | RCP 独有：自定义校验完全替换默认信任逻辑 |
+| 16 | 用户安装的 CA: 是否被信任 | 不带代码级 CA 访问 `:9443`（证书只由用户 CA 签发）——测"用户装了代理 CA 时能否被 MITM" |
+| 17 | 用户安装的 CA: 代码级信任 (对照) | 同一端点用代码级 CA，必须 200（否则核心探针不可解） |
 
 > 场景 10–15 由独立模块 `entry/src/main/ets/nsc/` 提供（**NSC 验证套件**），
 > 说明、结果矩阵与跨系统版本复验流程见 [`NSC-VERIFICATION.md`](NSC-VERIFICATION.md)。

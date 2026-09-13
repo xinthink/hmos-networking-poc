@@ -15,7 +15,8 @@ RCP 自身的安全配置（`rcp.SecurityConfiguration`）与系统网络安全�
 |---|---|---|
 | **TLS 信任** | NSC 的 `trust-anchors` 对 RCP **零作用**；RCP 只认自己的 `remoteValidation` | RCP 自身配置 |
 | **明文 HTTP** | RCP 无明文字段，明文**只能**由 NSC 决定；且 NSC 内部 **组件开关 > 全局开关** | NSC |
-| **证书锁定 (pin)** | 三方各自机制；RCP 只认自己的 `certificatePinning`，且与 `remoteValidation` 是 **AND**；NSC 的静态 `pin-set` 对 RCP 同样**零作用** | 见 §5.3 |
+| **证书锁定 (pin)** | 三方各自机制；RCP 只认自己的 `certificatePinning`，且与 `remoteValidation` 是 **AND**；NSC 的静态 `pin-set` 对 RCP 同样**零作用** | 见 §6 |
+| **用户安装的 CA（MITM 防护）** | RCP **默认信任**用户 CA，但 **遵守** NSC 的 `trust-global-user-ca` / `trust-current-user-ca = false` opt-out —— **这是 RCP 唯一遵守的 NSC 信任类开关** | 见 §6-G |
 
 ## 2. 模块地图
 
@@ -63,7 +64,14 @@ ets/
 | 11 | `pinSkipTrust` | RCP：`'skip'` + 错误 pin | RCP **FAIL** → pinning 独立于信任判定 |
 | 12 | `pinUntrustedTrust` | RCP：`'system'` + 正确 pin | RCP **FAIL(1007900060)** → pin 不能替代信任 |
 
-自检总计 **36 行** = 12 场景 × 3 框架（外加 ENV/DONE）。
+用户 CA 组（2 张，见 §6-G）：
+
+| # | key | 验证点 | 期望 |
+|---|---|---|---|
+| 13 | `userCaTrust` | 不带代码级 CA 访问 `:9443`（证书只由用户 CA 签发） | 用户 CA 已装且未 opt-out → 三方 200；opt-out 后 → 三方 FAIL |
+| 14 | `userCaByCodeCa` | 同一端点、把用户 CA 作为代码级 CA（对照） | 三方 200（否则核心探针不可解） |
+
+自检总计 **42 行** = 14 场景 × 3 框架（外加 ENV/DONE）。
 
 ## 4. 如何运行
 
@@ -122,9 +130,12 @@ UI 上每张卡片三列按钮（Network Kit / RCP / axios）独立可点，用�
 | `pinSkipTrust` | rcp | FAIL | ✅ FAIL 1007900090 | |
 | `pinUntrustedTrust` | rcp | FAIL | ✅ FAIL 1007900060 | |
 
-汇总：`ran=36 pass=25`（11 个期望 FAIL/N-A 组合；不带 pin-set 的提交版配置）。
+| `userCaTrust` | 三方 | 见 §6-G | ✅ 三方 200（**用户 CA 已装在设备上**）；未装时为三方 FAIL | |
+| `userCaByCodeCa` | 三方 | 200 | ✅ 三方 200 | |
 
-## 6. 证书锁定（pin）关系与优先级
+汇总：`ran=42 pass=31`（用户 CA 已装 + 提交版配置）；未装用户 CA 时为 `pass=28`。
+
+## 6. 配置关系与优先级（证书锁定 / 用户 CA）
 
 ### A. RCP：`remoteValidation` × `certificatePinning`（运行时，无需重构建）
 
@@ -185,8 +196,18 @@ Network Kit/axios `2300090 Specified pinned public key did not match`。
 
 V3–V6 四个变体里，**RCP 列的结果与提交版基线逐行一致**（`pinSpki` 200、`pinWrong`
 FAIL 1007900090、`nscTrust` FAIL 1007900060…）→ **RCP 完全忽略 NSC 的 `pin-set`**，
-与它忽略 NSC `trust-anchors` 一致。RCP 的安全配置遵循度总结：
-**`trust-anchors` 忽略、`pin-set` 忽略；只有 `component-config` 的明文开关对它生效。**
+与它忽略 NSC `trust-anchors` 一致。
+
+> ⚠️ **本节结论曾被过度概括，已修正**：早期把 RCP 的遵循度写成"只有明文开关生效"，
+> 但 §6-G 的用户 CA 实验证明 **RCP 也遵守 `trust-*-user-ca` opt-out**。
+> 准确的规律是：**RCP 遵守 NSC 中"收紧/限制性"的开关，不遵守"补充/放宽性"的配置**：
+>
+> | NSC 项 | 性质 | RCP 是否遵守 |
+> |---|---|---|
+> | `component-config` 明文开关 | 收紧（禁用明文） | ✅ 遵守 |
+> | `trust-global/current-user-ca: false` | 收紧（不信任用户 CA） | ✅ **遵守**（§6-G） |
+> | `trust-anchors`（app 级信任锚点） | 放宽（增加信任源） | ❌ 忽略 |
+> | `pin-set`（静态证书锁定） | 放松链校验的替代约束 | ❌ 忽略 |
 
 ### E. pin 值怎么算（证书轮换后必须更新）
 
@@ -261,6 +282,83 @@ V7 用**一次构建**把两个观测放进同一个 NSC 文件里，消除这�
 4. 与官方文档的冲突仍然存在（文档称 RCP 也可通过 `network_config.json` 配置 CA），
    待验证事项见 §10。
 
+### G. 用户安装的 CA 与 MITM 防护（RCP **遵守** opt-out）
+
+**威胁模型**：用户/代理工具（Charles、Fiddler、企业 MDM）把一张 CA 装进设备的
+**用户 CA 库**，然后用它签发服务器证书——这正是 HTTPS 中间人抓包的常规做法
+（官方文档原话：用户安装的 CA "可信度较低，可能被用于中间人攻击"）。
+NSC 提供顶层开关 `"trust-global-user-ca": false` / `"trust-current-user-ca": false`
+让应用拒绝这类 CA。
+
+**实验构造**：`npm run user-ca` 生成一张独立 CA（`nsc-user-ca`）与由它签发的服务器
+证书，跑在第三个监听 `:9443`。该链**不在** app trust-anchors、**也不在**系统库中
+（已验证：`openssl verify -CAfile certs/cert.pem user-server.pem` 失败），
+**只有**设备用户 CA 库能救它。三阶段实测（同一台模拟器、同一份 NSC）：
+
+| 阶段 | 用户 CA 已装 | `trust-*-user-ca` | Network Kit | axios | **RCP** |
+|---|---|---|---|---|---|
+| ① 阴性对照 | ❌ | 缺省 | ❌ 2300060 | ❌ 2300060 | ❌ 1007900060 |
+| ② 判据 | ✅ | 缺省（= 信任用户 CA） | ✅ **200** | ✅ **200** | ✅ **200** ← **RCP 默认也信任用户 CA** |
+| ③ opt-out | ✅ | 两者 `false` | ❌ 2300060 | ❌ 2300060 | ❌ **1007900060** ← **RCP 同样拒绝** |
+
+**结论**
+
+1. **RCP 默认信任用户安装的 CA**（与 Network Kit 相同）→ 不配 opt-out 时，
+   装了代理 CA 的设备上 **RCP 流量同样可被中间人解密**。
+2. **RCP 遵守 `trust-global-user-ca` / `trust-current-user-ca = false`**：
+   阶段 ③ 里 RCP 从 200 变为 `1007900060`，而 ②→③ 的唯一变化就是这两个顶层 key
+   （同一 App、同一设备、同一张已安装的 CA）→ 因果成立。
+   → **NSC 的这项配置可以保护 RCP 免受"用户 CA 型中间人"攻击。**
+3. 这是 RCP **唯一**遵守的 NSC 信任类开关（`trust-anchors`、`pin-set` 均忽略，见 §6-B/D）。
+   规律是"**收紧性开关遵守、补充性配置忽略**"。
+
+**假设的机制**（未验证）：`trust-*-user-ca` 改变的是**设备级 CA 集合的组装**，
+任何 TLS 栈（含 RCP 内部的实现）都会读到；而 `trust-anchors` / `pin-set` 是
+**应用级策略**，由 netstack 自身实施，RCP 不经过它。
+
+**对照有效性说明**（为什么这个结论站得住）
+
+- ① 与 ② 之间只差"装没装 CA"，NK/axios 由 FAIL 翻 200 → 证明"200 的来源确实是用户 CA"；
+- ② 与 ③ 之间只差那两个 key → 证明失败由 opt-out 引起；
+- ③ 里 `nscCleartext`（三方 200）、`nscTrustCa`（三方 200）、`pinSpki`（三方 200）、
+  `nscTrust netkit`（200）全部正常 → 证明该 NSC **解析正常、其余策略仍生效**，
+  不是"配置写坏导致全盘拒绝"。
+
+**如何装用户 CA（本环境实测可行的路径）**
+
+⚠️ 应用侧 API `certificateManagerDialog.openInstallCertificateDialog` 在**本模拟器返回
+`29700004 - The API is not supported on this device`**（"deviceType is not support"），
+尽管 syscap `Security.CertificateManagerDialog=true` 且 `com.ohos.certmanager` 与
+`cert_manager_se` 都存在。可用的替代路径是**走证书管理 UI**：
+
+```bash
+# 1) 把 CA 推到设备文档目录（shell 属于 file_manager 组，可写）
+hdc file send mock-server/certs/user-ca.pem \
+  /storage/media/100/local/files/Docs/Download/nsc-user-ca.crt
+
+# 2) 直接拉起证书管理界面（它的 MainAbility 不是 launcher 入口，只能这样起）
+hdc shell "aa start -b com.ohos.certmanager -a MainAbility"
+
+# 3) UI 路径（点坐标来自 uitest dumpLayout，本机 1280x2848）
+#    Install from storage → CA certificates → 选文件
+#      (Browse → Downloads/Received → Download Manager → nsc-user-ca.crt → Done)
+#    → Install → 出现 "Installed successfully"
+```
+
+卸载：同一界面的 "Delete all certificates and credentials"，或 CA 列表里删除。
+
+**复现实验的完整步骤**
+
+1. `cd mock-server && npm run user-ca`（生成 CA/服务器证书；`npm start` 会自动监听 `:9443`）
+2. 按上面的 UI 路径把 `user-ca.pem` 装成用户 CA
+3. 点 App 顶部**「自检 NSC × RCP 组」** → 看 `userCaTrust` / `userCaByCodeCa` 两行
+   （阶段 ② 对应"提交版配置"；阶段 ③ 对应在 `network_config.json` **顶层**加
+   `"trust-global-user-ca": false` 与 `"trust-current-user-ca": false` 后重新构建）
+4. ⚠️ 阶段 ① 必须在**装 CA 之前**跑，或先卸载 CA——否则拿不到阴性对照
+
+**设备当前状态提醒**：本机模拟器上 **`nsc-user-ca` 仍然装着**，所以提交版基线下
+`userCaTrust` 三方都是 200（`pass=31` 而非 28）。要回到"未装"状态需在证书管理 UI 里删除。
+
 ## 7. 跨版本复验（手工，系统升级后做一次）
 
 **前置**：mock server 已启动（`cd mock-server && npm start`）；模拟器/真机已连通；
@@ -282,7 +380,7 @@ V7 用**一次构建**把两个观测放进同一个 NSC 文件里，消除这�
 > ⚠️ 证书轮换會影响全部 HTTPS 场景：`mock-server` 重新生成证书后必须同步
 > `AppConfig.MOCK_CA_PEM` 与 `resfile/mock-ca/`（见 `AGENTS.md`「HTTPS 自签名证书」）。
 
-## 8. 变体实验（build-variant：明文 + 证书锁定）
+## 8. 变体实验（build-variant：明文 + 证书锁定 + 用户 CA）
 
 明文的优先级无法在运行时切换——`network_config.json` 随 HAP 打包，必须改配置重构建。
 
@@ -301,8 +399,15 @@ V7 用**一次构建**把两个观测放进同一个 NSC 文件里，消除这�
 | V5 | **移除** | 正确 | `nscTrust` FAIL 2300060（pin 救不了不受信链） |
 | V6 | mock CA | 错误但 `expiration: 2020-01-01`（已过期） | `nscTrust` 200；动态 pin 恢复生效 |
 
+**用户 CA（MITM 防护）**：
+
+| 变体 | 用户 CA | 顶层 `trust-global-user-ca` / `trust-current-user-ca` | 实测结果 |
+|---|---|---|---|
+| U1（提交版） | 已装 | 未配置（= 信任） | 三方 `userCaTrust` **200** |
+| U2 | 已装 | 都 `false` | 三方 **FAIL**（NK/axios 2300060、**RCP 1007900060**） |
+
 流程：改 JSON → `devecocli build` → `run --skip-build --uninstall` → 点自检 →
-读 `nscCleartext` / `nscTrust` / `pin*` 行 → **`git checkout -- <config>` 还原并重建**
+读 `nscCleartext` / `nscTrust` / `pin*` / `userCa*` 行 → **`git checkout -- <config>` 还原并重建**
 （别忘了还原）。
 
 ## 9. 已知坑
@@ -321,6 +426,10 @@ V7 用**一次构建**把两个观测放进同一个 NSC 文件里，消除这�
    用 `cd mock-server && npm run pins` 重算，否则 pin 场景全红。
 7. **`pin-set` 会静默压制代码里的 `certificatePinning`**（生效中的域级静态 pin 优先，
    见 §6-C）：排查 pin 不生效时先确认 NSC 里有没有配 `pin-set`。
+8. **应用侧装用户 CA 的 API 在本模拟器不可用**：`openInstallCertificateDialog` 返回
+   `29700004`（deviceType 不支持），必须走证书管理 UI（§6-G 有完整路径）。
+9. **`trust-*-user-ca` 是 `network-security-config` 的兄弟节点**（顶层 key），
+   写进 `network-security-config` 内部很可能被静默忽略。
 
 ## 10. 待验证事项（Pending，已知未做）
 
@@ -330,7 +439,8 @@ V7 用**一次构建**把两个观测放进同一个 NSC 文件里，消除这�
 |---|---|---|---|
 | 1 | **真机复测**（商用 HarmonyOS 真机，非模拟器） | 现有全部结论来自 `OpenHarmony-6.1.1.125` 模拟器镜像；RCP 属 hms 协作能力域、SDK 里 `librcp_c.so` 只是空 stub、真实实现由设备提供 —— 模拟器镜像的 RCP 很可能未接 NSC 集成。这是"文档称 RCP 也读 `network_config.json`，实测却不读"这一矛盾的**首要候选解释** | 真机上跑同一份自检，对比 `nscTrust`/`pinSpki` 等 RCP 列 |
 | 2 | **域名（主机名）而非 IP 的 domain 匹配** | 我们的 `domain-config.domains.name` 用的是 IP `10.0.2.2`。Network Kit 按 IP 匹配成功，但 RCP 的实现可能只按**主机名**匹配 domain-config | 把 mock server 用主机名访问（如 `localhost` / 自定义 hosts 名）重跑 `nscTrust` |
-| 3 | **CA 目录形态** | 我们的 `trust-anchors.certificates` 目录里同时放 `cert.pem` 与 `openssl x509 -hash` 命名的 `<hash>.0`。Network Kit 接受，RCP 的加载器可能只认其中一种 | 分别只放 `<hash>.0` / 只放 `cert.pem` 各跑一轮 |
+| 3 | **真实 MITM 代理演示**（用户已明确留待以后） | 本套件只做了机制验证：由用户 CA 直接给测试服务器签证书。要证明"攻击确实成功/被挡住"，还需要一个 TLS 终止 + 用用户 CA 现场签发伪造证书的代理进程，并处理代理配置（实测 RCP 日志为 `proxyType:none`，它默认不走系统代理） | 加 MITM 代理后重跑 `userCaTrust` |
+| 4 | **CA 目录形态** | 我们的 `trust-anchors.certificates` 目录里同时放 `cert.pem` 与 `openssl x509 -hash` 命名的 `<hash>.0`。Network Kit 接受，RCP 的加载器可能只认其中一种 | 分别只放 `<hash>.0` / 只放 `cert.pem` 各跑一轮 |
 
 > 结论口径：在上述三项完成前，本套件的 RCP 遵循度结论应表述为
 > "**在 OpenHarmony 6.1.1(24) 模拟器镜像、IP 域匹配、当前 CA 目录形态下**，
