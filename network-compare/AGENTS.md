@@ -39,6 +39,12 @@ devecocli log --device "Pura 90" --bundle-name com.example.networkcompare --from
 
 > `devecocli build/run` 需写 `~/.hvigor`、`~/.ohpm`，**必须在本机非沙箱环境执行**。
 
+> ⚠️ **同时连着模拟器和真机时，所有 `hdc` 命令都必须带 `-t <serial>`**（裸 `hdc shell`
+> 报 `ExecuteCommand need connect-key`）。踩过：脚本因此静默不生效，误判"回归通过"。
+
+> 真机（HUAWEI Pocket 2）安装需要**华为签发的调试 profile**（本地 OpenHarmony 签名被拒
+> `9568257`）。完整前置与运行步骤见 [`NSC-VERIFICATION.md`](NSC-VERIFICATION.md) §11。
+
 ## 架构约定：如何新增一个对比场景
 
 三套框架的 runner 采用**镜像方法**结构：每个场景在 `NetKitScenarios.ets`、
@@ -227,7 +233,8 @@ devecocli log --device "Pura 90" --bundle-name com.example.networkcompare \
 → 点自检 → 读 NSCTEST → **实验结束后 `git checkout -- <config>` 还原并重建**。
 
 ### 待验证事项（未做，勿当结论）
-`NSC-VERIFICATION.md` §10 列了四项待验证：**真机复测**（现有结论全部来自 OpenHarmony 模拟器镜像）、
+`NSC-VERIFICATION.md` §10 列了四项待验证：**真机复测**（已就绪、**阻塞于华为签名要求**，
+见该文 §11）、
 **主机名域匹配**（我们用的是 IP `10.0.2.2`）、**真实 MITM 代理演示**（用户已明确留待以后）、
 **CA 目录形态**（同时放 `cert.pem` 与 `<hash>.0`）。
 在这些完成前，RCP 遵循度结论的环境口径应写成"OpenHarmony 6.1.1(24) 模拟器 + IP 域匹配 + 当前目录形态下"。
@@ -251,7 +258,11 @@ RCP 独有能力的卡片，Network Kit/axios 列返回
 
 ### 服务器可达性
 - 模拟器访问宿主机：`10.0.2.2`（`AppConfig.host` 默认值，UI 顶部可改）。
-- 真机：改为开发机局域网 IP。
+- **真机（推荐）**：用 `hdc -t <serial> rport tcp:8080 tcp:8080`（8443/9443 同理）建立反向
+  转发，App 里 host 填 **`127.0.0.1`** —— 绕过 LAN/AP 隔离（实测本机真机与宿主同网段但 ping 不通）。
+- 真机（备选）：改为开发机局域网 IP。
+- `network_config.json` 的 `domain-config.domains` 已含 `10.0.2.2` / `127.0.0.1` / `localhost`，
+  两种设备共用同一份配置。
 - HarmonyOS 默认允许 HTTP 明文传输，无需网络安全配置。
 
 ## 验证流程（模拟器端到端，无头操作）

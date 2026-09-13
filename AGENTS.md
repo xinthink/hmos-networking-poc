@@ -111,6 +111,10 @@ devecocli emulator list / start "Pura 90"
 > `devecocli build/run` 需要写 `~/.hvigor`、`~/.ohpm`，**必须在本机非沙箱环境执行**；
 > 在受控环境运行前先确认写权限。
 
+> ⚠️ **多个目标同时在连时（模拟器 + 真机），所有 `hdc` 命令都要带 `-t <serial>`**；
+> 裸 `hdc shell` 会报 `ExecuteCommand need connect-key` 并**静默导致自动化不生效**。
+> 真机（HUAWEI Pocket 2）验证的前置与步骤见 `network-compare/NSC-VERIFICATION.md` §11。
+
 ## 跨工程约定（改代码时保持同步）
 
 1. **端口固定**：8080（h1 明文）/ 8443（h2 TLS）。改端口须同步

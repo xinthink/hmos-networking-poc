@@ -113,7 +113,7 @@ UI 上每张卡片三列按钮（Network Kit / RCP / axios）独立可点，用�
 
 ## 5. 结果矩阵（按系统版本）
 
-| 场景 | 列 | 期望 | HarmonyOS 6.1.1(24) 实测<br>（emulator 6.1.0.126） | 新版本待填 |
+| 场景 | 列 | 期望 | HarmonyOS 6.1.1(24) 实测<br>（emulator 6.1.0.126） | 真机 / 新版本待填<br>（见 §11） |
 |---|---|---|---|---|
 | `nscTrust` | netkit | 200 | ✅ 200 | |
 | `nscTrust` | rcp | FAIL | ✅ FAIL 1007900060 | |
@@ -430,6 +430,12 @@ hdc shell "aa start -b com.ohos.certmanager -a MainAbility"
    `29700004`（deviceType 不支持），必须走证书管理 UI（§6-G 有完整路径）。
 9. **`trust-*-user-ca` 是 `network-security-config` 的兄弟节点**（顶层 key），
    写进 `network-security-config` 内部很可能被静默忽略。
+10. **同时连着模拟器和真机时，裸 `hdc shell` 会失败**（`ExecuteCommand need connect-key`）——
+    所有 `hdc` 命令都必须带 `-t <serial>`，否则自动化脚本会"静默不生效"
+    （本仓库踩过：自检按钮没被点到，误以为回归通过）。
+11. **真机安装需要华为签发的调试 profile**：SDK 自带的 OpenHarmony 默认签名材料
+    （`OpenHarmony.p12` 等）签出的包会被真机拒绝（`9568257 fail to verify pkcs7 file`），
+    未签名包则报 `9568320 no signature file`。详见 §11。
 
 ## 10. 待验证事项（Pending，已知未做）
 
@@ -437,7 +443,7 @@ hdc shell "aa start -b com.ohos.certmanager -a MainAbility"
 
 | # | 待验证 | 为什么要做 | 怎么判定 |
 |---|---|---|---|
-| 1 | **真机复测**（商用 HarmonyOS 真机，非模拟器） | 现有全部结论来自 `OpenHarmony-6.1.1.125` 模拟器镜像；RCP 属 hms 协作能力域、SDK 里 `librcp_c.so` 只是空 stub、真实实现由设备提供 —— 模拟器镜像的 RCP 很可能未接 NSC 集成。这是"文档称 RCP 也读 `network_config.json`，实测却不读"这一矛盾的**首要候选解释** | 真机上跑同一份自检，对比 `nscTrust`/`pinSpki` 等 RCP 列 |
+| 1 | **真机复测**（HUAWEI Pocket 2 / 华为 6.1.0.135）—— *已尝试，阻塞于签名* | 现有全部结论来自 `OpenHarmony-6.1.1.125` 模拟器镜像。这是"文档称 RCP 也读 `network_config.json`，实测却不读"这一矛盾的**首要候选解释** | 真机上跑同一份自检，对比 `nscTrust`/`pinSpki`/`userCaTrust` 等 RCP 列。**步骤与前置见 §11** |
 | 2 | **域名（主机名）而非 IP 的 domain 匹配** | 我们的 `domain-config.domains.name` 用的是 IP `10.0.2.2`。Network Kit 按 IP 匹配成功，但 RCP 的实现可能只按**主机名**匹配 domain-config | 把 mock server 用主机名访问（如 `localhost` / 自定义 hosts 名）重跑 `nscTrust` |
 | 3 | **真实 MITM 代理演示**（用户已明确留待以后） | 本套件只做了机制验证：由用户 CA 直接给测试服务器签证书。要证明"攻击确实成功/被挡住"，还需要一个 TLS 终止 + 用用户 CA 现场签发伪造证书的代理进程，并处理代理配置（实测 RCP 日志为 `proxyType:none`，它默认不走系统代理） | 加 MITM 代理后重跑 `userCaTrust` |
 | 4 | **CA 目录形态** | 我们的 `trust-anchors.certificates` 目录里同时放 `cert.pem` 与 `openssl x509 -hash` 命名的 `<hash>.0`。Network Kit 接受，RCP 的加载器可能只认其中一种 | 分别只放 `<hash>.0` / 只放 `cert.pem` 各跑一轮 |
@@ -445,4 +451,100 @@ hdc shell "aa start -b com.ohos.certmanager -a MainAbility"
 > 结论口径：在上述三项完成前，本套件的 RCP 遵循度结论应表述为
 > "**在 OpenHarmony 6.1.1(24) 模拟器镜像、IP 域匹配、当前 CA 目录形态下**，
 > RCP 不遵守 NSC 的 `trust-anchors` 与 `pin-set`"。
+
+## 11. 真机验证（已就绪，阻塞于签名）
+
+### 11.1 当前状态
+
+真机 **HUAWEI Pocket 2（`LEM-AL00`，软件 6.1.0.135，API 24）** 已连上；除**签名**外的前置
+全部就绪（见 11.2）。签名阻塞与两条错误码：
+
+| 尝试 | 结果 |
+|---|---|
+| `devecocli run --device "HUAWEI Pocket 2"` （未签名 hap） | `Target device is a real device, but the artifact for 'entry' is not signed` |
+| `hdc install` 未签名 hap | `error: failed to install bundle. code:9568320 error: no signature file` |
+| 用 SDK 的 OpenHarmony 默认材料本地签名（见 11.4） | 签名成功，但安装被拒：**`9568257 error: fail to verify pkcs7 file`** |
+
+→ **华为零售机不信任 OpenHarmony 默认签名链**，必须用华为签发的调试 profile。
+
+**解锁办法（需人工，一次即可）**：DevEco Studio → `File ▸ Project Structure ▸ Signing Configs`
+→ 勾选 **Automatically generate signature**（需登录华为开发者账号，且设备已连接；DevEco 会把
+设备 UDID 注册进调试 profile）。之后：
+
+```bash
+cd network-compare
+devecocli build
+devecocli run --device "HUAWEI Pocket 2"          # 应能签名并安装
+```
+
+### 11.2 已确认的真机事实
+
+| 检查项 | 结果 |
+|---|---|
+| 系统 / API | `const.ohos.apiversion` = **24**；`const.ohos.fullname` = `OpenHarmony-6.1.1.120`；软件版本 `6.1.0.135(SP8C00E120R6P6)`；UDID `BF59…4861` |
+| RCP 能力域 | `const.SystemCapability.Collaboration.RemoteCommunication = true`；`CollaborationFw` 进程在 |
+| 证书管理（用户 CA 实验前提） | `Security.CertificateManager(Dialog) = true`、`cert_manager_se` 进程在、`com.ohos.certmanager` 存在 → 用户 CA 安装路径具备（且真机的 `openInstallCertificateDialog` **可能可用**，模拟器上返回 29700004，值得先试 App 内按钮） |
+| 网络通路 | 设备 `192.168.1.7` 与宿主 `192.168.1.15` 同网段但 **ping 不通**（疑似 AP 隔离）→ 改用 **hdc 反向端口转发**（见 11.3），设备侧走 `127.0.0.1` |
+| 设备端 HTTP 工具 | 无 curl/wget/nc（toybox 里也没有 wget）→ 首次请求靠 mock server 的 `[req]` 日志确认 |
+| shell 权限 | `uid=2000(shell)`，无 root（与模拟器相同） |
+
+### 11.3 真机运行步骤（copy-paste）
+
+```bash
+# 1) 反向端口转发：设备侧 127.0.0.1:{8080,8443,9443} -> 宿主机 mock server
+D=XMH0224221029059                       # hdc list targets 里的真机 serial
+hdc -t $D rport tcp:8080 tcp:8080
+hdc -t $D rport tcp:8443 tcp:8443
+hdc -t $D rport tcp:9443 tcp:9443
+hdc -t $D fport ls                        # 三行 [Reverse] 即成功
+
+# 2) mock server 必须在跑（三个监听）
+cd mock-server && npm start               # :8080 / :8443 / :9443
+
+# 3) 构建安装到真机（需先完成 11.1 的自动签名）
+cd ../network-compare
+devecocli build && devecocli run --device "HUAWEI Pocket 2" --skip-build --uninstall
+
+# 4) 把 App 里的 host 改成 127.0.0.1（UI 顶部输入框 + 「应用」按钮）
+#    坐标先取（真机分辨率与模拟器不同）：
+hdc -t $D shell "uitest dumpLayout -p /data/local/tmp/l.json" && hdc -t $D shell "cat /data/local/tmp/l.json" > /tmp/l.json
+#    用 dump 到的输入框中心坐标替换 <X> <Y>：
+hdc -t $D shell "uitest uiInput inputText <X> <Y> 127.0.0.1"
+
+# 5) 点自检（坐标同样来自 dumpLayout），读结果
+hdc -t $D shell "hilog -r"
+hdc -t $D shell "uitest uiInput click <自检按钮中心X> <自检按钮中心Y>"
+sleep 70
+devecocli log --device "HUAWEI Pocket 2" --bundle-name com.example.networkcompare \
+  --keyword NSCTEST --from 5m --tail 400 | grep NSCTEST | sed 's/.*NSCTEST/NSCTEST/' | sort -u
+```
+
+**NSC 配置已就绪**：`network_config.json` 的 `domain-config.domains` 已包含
+`10.0.2.2`（模拟器）、**`127.0.0.1` 与 `localhost`**（真机走反向转发），所以**同一份提交版
+配置对两种设备都适用**，不需要换配置。（该改动已在模拟器上回归：42 行结果与改动前一致。）
+
+**用户 CA 场景（真机）**：优先用 App 顶部「安装用户 CA 到设备证书库」按钮并读 hilog 关键字
+`USERCATEST`；若真机同样返回 29700004，则走证书管理 UI（路径同 §6-G，注意真机 UI 文案可能是中文）。
+CA 文件先在宿主侧生成（`npm run user-ca`）再推入设备文档目录。
+
+### 11.4 本机本地签名尝试的记录（供以后复用/排错）
+
+本机 **没有** `~/.ohos/config/`（无 DevEco 自动签名材料），但 DevEco 自带完整
+OpenHarmony 签名工具链：`sdk/default/openharmony/toolchains/lib/{hap-sign-tool.jar,
+OpenHarmony.p12, OpenHarmonyProfileDebug.pem, UnsgnedDebugProfileTemplate.json}`。
+
+可行流程（已跑通"签名"这一步，仅"安装"被真机拒绝）：
+
+1. 由 `UnsgnedDebugProfileTemplate.json` 生成本工程 profile：`bundle-name` 改
+   `com.example.networkcompare`、`debug-info.device-ids` 填真机 UDID、`validity` 展期；
+2. `hap-sign-tool sign-profile`（alias `openharmony application profile debug` +
+   `OpenHarmonyProfileDebug.pem`，口令 `123456`）→ `profile.p7b`；
+3. **证书链必须用 profile 模板里内嵌的 `development-certificate` 作 leaf**：
+   `keytool -exportcert -alias "openharmony application release"` 导出的是**自签**证书，
+   拿它组链会报 `verify certificate chain failed! Signature does not match`；
+   正确链 = 模板 leaf + `openharmony application ca` + `openharmony application root ca`
+   （`openssl verify` 通过，且与 p12 私钥公钥一致）；
+4. `hap-sign-tool sign-app`（`-appCertFile` 需 `.cer` 后缀，内容为上述三级链）。
+
+结论：这条路线在**真机**上走不通（华为设备信任华为根），但可用于 OpenHarmony 设备或模拟器。
 
