@@ -176,9 +176,13 @@ devecocli log --device "Pura 90" --bundle-name com.example.networkcompare \
 ### 真机复测（2026-09，HUAWEI Pocket 2 / LEM-AL00，华为 6.1.0.135，API 24）
 
 NSC 自检 **42 行与模拟器逐行一致**，域匹配用主机名（`localhost`）或 IP（`10.0.2.2` /
-`127.0.0.1`）结论相同 → "RCP 忽略 NSC `trust-anchors`/`pin-set`、但遵守用户 CA opt-out"
-在真机同样成立。官方文档称"RCP 也读 `network_config.json`"与实测的冲突仍未定位
-（"模拟器镜像不完整"与"RCP 只认主机名"两种解释均已被排除）。细节见
+`127.0.0.1`）结论相同。由于提交版配置里没有静态 `pin-set`，又补跑了带错误 `pin-set` 的
+**V4/V7 变体构建**：RCP 列仍与基线逐行一致（`pinSpki` 200、`nscTrust` 1007900060），
+而同一次运行里 netkit/axios 被静态 pin 全面拦死（`2300090`）；V7 里
+**rcp 明文被拦 `1007900201`** 更证明这份 NSC 在该构建中确实对 RCP 生效。
+→ **"RCP 忽略 NSC `trust-anchors`、忽略 `pin-set`、遵守用户 CA opt-out"三条结论均已在真机成立**。
+官方文档称"RCP 也读 `network_config.json`"与实测的冲突仍未定位（"模拟器镜像不完整"与
+"RCP 只认主机名"两种解释均已被排除）。细节见
 [`network-compare/NSC-VERIFICATION.md`](./network-compare/NSC-VERIFICATION.md) §11。
 
 ## 目录结构

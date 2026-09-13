@@ -27,7 +27,7 @@ Cookie、Cache（含 ETag）、Multipart、二进制上传等差异。另有第�
 
 | 子工程 | 角色 | 专属指南 | 关键文档 |
 |--------|------|----------|----------|
-| `mock-server/` | Node.js Mock Server：`:8080` 明文 HTTP/1.1 + `:8443` TLS/ALPN（h2+h1），零依赖 | [`mock-server/AGENTS.md`](mock-server/AGENTS.md) | `mock-server/README.md` |
+| `mock-server/` | Node.js Mock Server：`:8080` 明文 HTTP/1.1 + `:8443` TLS/ALPN（h2+h1）+ `:9443` 用户 CA 实验用 TLS，零依赖 | [`mock-server/AGENTS.md`](mock-server/AGENTS.md) | `mock-server/README.md` |
 | `network-compare/` | HarmonyOS App（bundle `com.example.networkcompare`，API 24）：对比 UI + 三框架 runner（Network Kit / RCP / Axios） | [`network-compare/AGENTS.md`](network-compare/AGENTS.md) | [`network-compare/README.md`](network-compare/README.md) |
 | `cj-network-compare/` | 纯 Cangjie App（bundle `com.example.myapplication`，API 24）：11 个场景用 Cangjie Network Kit 实现（**无 RCP/Axios——RCP 无 Cangjie 绑定**） | [`cj-network-compare/AGENTS.md`](cj-network-compare/AGENTS.md) | [`cj-network-compare/README.md`](cj-network-compare/README.md) |
 
@@ -98,8 +98,10 @@ Cookie、Cache（含 ETag）、Multipart、二进制上传等差异。另有第�
 
 ```bash
 # Mock Server（必须先于 App 运行；在 mock-server/ 下）
-npm run certs   # 首次/证书丢失：生成自签名证书
-npm start       # :8080 (HTTP/1.1) + :8443 (HTTP/2/HTTP/1.1)
+npm run certs     # 首次/证书丢失：生成自签名证书
+npm run user-ca   # 首次：生成"用户 CA"实验材料（:9443，公钥入库、私钥 gitignore）
+npm run pins      # 证书换了之后重算 pin 摘要（填 NscPins.ets / pin-set）
+npm start         # :8080 (HTTP/1.1) + :8443 (HTTP/2/HTTP/1.1) + :9443 (用户 CA 实验)
 
 # App（在 network-compare/ 下）
 devecocli build                                    # 编译（ArkTS 严格检查）
@@ -120,7 +122,8 @@ devecocli emulator list / start "Pura 90"
 
 ## 跨工程约定（改代码时保持同步）
 
-1. **端口固定**：8080（h1 明文）/ 8443（h2 TLS）。改端口须同步
+1. **端口固定**：8080（h1 明文）/ 8443（h2 TLS）/ 9443（用户 CA 实验 TLS，仅
+   `npm run user-ca` 生成材料后启用）。改端口须同步
    `mock-server/server.mjs` 与 `network-compare/.../common/AppConfig.ets`。
 2. **证书同步（三处）**：`npm run certs` 重新生成 `mock-server/certs/cert.pem` 后，
    **必须**同步三处：
@@ -168,8 +171,10 @@ devecocli emulator list / start "Pura 90"
 > **忽略补充性配置**（`trust-anchors` app 级信任锚点、`pin-set` 静态证书锁定）。
 >
 > ✅ **NSC 相关几行已在真机复测（2026-09）**：HUAWEI Pocket 2（LEM-AL00，华为 6.1.0.135，
-> API 24）上 42 行结果与模拟器**逐行一致**；**主机名（`localhost`）与 IP（`10.0.2.2` /
-> `127.0.0.1`）两种域匹配方式结论也相同**。→ 官方文档称"RCP 也读 `network_config.json`"
+> API 24）上，提交版基线的 42 行结果与模拟器**逐行一致**；**主机名（`localhost`）与 IP
+> （`10.0.2.2` / `127.0.0.1`）两种域匹配方式结论也相同**；另外补跑了带静态 `pin-set`
+> 的 V4/V7 变体，RCP 列仍与基线逐行一致 → **"忽略 `trust-anchors`、忽略 `pin-set`、遵守
+> 用户 CA opt-out"三条结论都已有真机证据**。→ 官方文档称"RCP 也读 `network_config.json`"
 > 与实测的冲突**不能用"模拟器镜像不完整"或"RCP 只认主机名"来解释**，仍未定位。
 > 剩余待验证：CA 目录形态、真实 MITM 代理演示（清单见
 > `network-compare/NSC-VERIFICATION.md` §10）。

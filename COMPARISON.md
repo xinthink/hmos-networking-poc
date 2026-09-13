@@ -277,6 +277,14 @@ V7 用**一次构建**把两件事放进同一份 NSC：`cleartextTrafficPermitt
 "完全没有这些配置"的基线**逐行一致**。→ 对**信任锚点与静态 pin** 这两类补充性配置，
 RCP 的遵循度为零（另见 ⑤：RCP **会**遵守"拒绝用户 CA"这类收紧性开关）。
 
+✅ **真机复现（2026-09，HUAWEI Pocket 2 / LEM-AL00 6.1.0.135）**：V4（错误静态 `pin-set`）
+与 V7（`cleartext=false` + RCP 组件开关 true + 错误 `pin-set`）两个变体构建都在真机上跑了一轮
+自检，RCP 列与真机基线**逐行一致**（`nscTrust` 1007900060、`pinSpki` 200、`pinWrong` 1007900090），
+而同一次运行里 netkit/axios 被静态 pin 全面拦死（`2300090`，连 `userCaByCodeCa` 都不例外）；
+V7 里 **rcp `nscCleartext = 1007900201`** 证明这份 NSC 确实被 RCP 读取生效。
+→ 本节四条结论（忽略 anchors、忽略 pin-set、静态 pin 覆盖动态 pin、开关生效的同构建自证）
+**均已在真机成立**（细节见 `NSC-VERIFICATION.md` §11.3–§11.4）。
+
 ⚠️ 边界（真机复测后已收窄）：以上结论原本只在 **OpenHarmony 6.1.1(24) 模拟器镜像**上成立
 （`domain-config` 用 IP 匹配、CA 目录同时含 `cert.pem` 与 `<hash>.0`）。**真机复测与主机名域匹配
 两项已完成**：HUAWEI Pocket 2（LEM-AL00，华为 6.1.0.135，API 24）上 42 行结果与模拟器**逐行一致**，
@@ -306,7 +314,9 @@ host 换成主机名 `localhost` 后结论也不变 → 官方文档"RCP 也读 
   `openInstallCertificateDialog` 在**模拟器与真机上均**返回 `29700004`，装 CA 必须走证书管理 UI
   （完整路径见 `NSC-VERIFICATION.md` §6-G）。
 - ✅ **真机复测（2026-09）**：以上三阶段（未装 CA → 装 CA 缺省 → 装 CA + opt-out）在
-  HUAWEI Pocket 2 上逐行一致（见 `NSC-VERIFICATION.md` §11.3）。
+  HUAWEI Pocket 2 上逐行一致；V4/V7 的 pin-set 变体里 RCP 的 `userCaTrust`/`userCaByCodeCa`
+  也分别保持 200/200（说明真机确实装着用户 CA，RCP 列未被静态 `pin-set` 干扰）
+  （见 `NSC-VERIFICATION.md` §11.3–§11.4）。
 
 **复现方式**
 

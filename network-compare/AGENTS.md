@@ -223,22 +223,29 @@ devecocli log --device "Pura 90" --bundle-name com.example.networkcompare \
 | U1（提交版） | 已装 | 未配置（= 信任） | 三方 `userCaTrust` 200 |
 | U2 | 已装 | 都 `false` | 三方 FAIL（NK/axios 2300060、RCP 1007900060） |
 
-> 装用户 CA 的路径：应用侧 `openInstallCertificateDialog` 在**本模拟器返回 29700004**，
+> 装用户 CA 的路径：应用侧 `openInstallCertificateDialog` 在**模拟器与真机上均返回
+> 29700004**，
 > 必须走证书管理 UI —— `aa start -b com.ohos.certmanager -a MainAbility` →
 > Install from storage → CA certificates → Browse → Downloads/Received → Download Manager
 > → 选 `nsc-user-ca.crt` → Done → Install。文件先用
 > `hdc file send certs/user-ca.pem /storage/media/100/local/files/Docs/Download/nsc-user-ca.crt` 推上去。
-> ⚠️ 本机模拟器**当前仍装着**该 CA，所以基线里 `userCaTrust` 是 200（`pass=31`）。
+> ⚠️ 本机模拟器与真机**当前都装着**该 CA，所以基线里 `userCaTrust` 是 200（`pass=31`）。
 
 > 结论：NSC 的 trust-anchors 与 pin-set 是 **AND**；**生效中的域级 `pin-set` 完全覆盖
 > 请求级 `certificatePinning`**（动态 pin 不参与判定）；RCP 对两者都**忽略**。
+> ✅ V4（错误 `pin-set`）与 V7（+ `cleartext=false`）**真机也已复现**（RCP 列与基线一致，
+> netkit/axios 全被静态 pin 判死 `2300090`）——见 `NSC-VERIFICATION.md` §11.4。
 
 流程：改 JSON → `devecocli build` → `devecocli run --device "Pura 90" --skip-build --uninstall`
 → 点自检 → 读 NSCTEST → **实验结束后 `git checkout -- <config>` 还原并重建**。
+真机同样流程（`--device "HUAWEI Pocket 2"`），⚠️ 真机锁屏时 `aa start`/点击都无效，但
+`hdc -t <serial> install -r <hap>` 仍可装包。
 
 ### 待验证事项（见 `NSC-VERIFICATION.md` §10）
-✅ 已完成：**真机复测**（LEM-AL00 6.1.0.135，42 行与模拟器逐行一致）、
-**主机名 vs IP 域匹配**（`localhost` 与 `127.0.0.1` 结论相同）。
+✅ 已完成：**真机复测**（LEM-AL00 6.1.0.135，提交版基线 42 行与模拟器逐行一致）、
+**主机名 vs IP 域匹配**（`localhost` 与 `127.0.0.1` 结论相同）、
+**静态 `pin-set` 变体 V4/V7 真机复现**（RCP 列与基线一致，netkit/axios 被静态 pin 拦死；
+V7 里 rcp 明文 `1007900201` 自证开关生效 —— 见 `NSC-VERIFICATION.md` §11.4）。
 ⏳ 仍待验证：**真实 MITM 代理演示**（用户已明确留待以后）、**CA 目录形态**（同时放
 `cert.pem` 与 `<hash>.0`）。
 

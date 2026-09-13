@@ -27,8 +27,9 @@ devecocli run --device "Pura 90"                 # 构建+安装+启动（debug 
 **真机（HUAWEI Pocket 2 等零售机）**：需要华为签发的调试 profile —— 用 DevEco 的
 `File ▸ Project Structure ▸ Signing Configs ▸ 自动签名` 配一次即可（会改写
 `build-profile.json5`，**提交前请还原**）；再用 `hdc -t <serial> rport` 做端口反向转发。
-完整步骤与坑见 [`NSC-VERIFICATION.md`](NSC-VERIFICATION.md) §11。真机验证已完成，
-NSC 42 行结果与模拟器逐行一致。
+完整步骤与坑见 [`NSC-VERIFICATION.md`](NSC-VERIFICATION.md) §11。真机验证已完成：
+NSC 42 行结果与模拟器逐行一致，带静态 `pin-set` 的 V4/V7 变体也在真机上复现
+（RCP 忽略 anchors/pin-set，而 netkit/axios 被静态 pin 拦死）。
 
 ## 场景清单（App 首页逐张卡片，Network Kit / RCP / Axios 三列运行）
 
