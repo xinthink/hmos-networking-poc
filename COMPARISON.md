@@ -259,6 +259,26 @@ pin 正确也救不了不受信链（`1007900060`）；pin 数组为白名单语
 > 套件说明、逐版本结果矩阵、**系统升级后的手工复验流程**见
 > [`network-compare/NSC-VERIFICATION.md`](network-compare/NSC-VERIFICATION.md)。
 
+**④ 同一构建自证（V7，消除"开关没生效"的辩解）**
+
+有人可以质疑："RCP 不遵守 anchors/pin-set，会不会是因为 `component-config."Remote Communication Kit"` 没生效？"
+V7 用**一次构建**把两件事放进同一份 NSC：`cleartextTrafficPermitted: false` + 三项 component-config 全 true
++ 正确的 trust-anchors + **错误**摘要的 `pin-set`。实测（`ran=36 pass=12`）：
+
+| 观测 | Network Kit / axios | RCP |
+|---|---|---|
+| `nscCleartext` | ❌ 2300997 | ❌ **1007900201**（证明该开关**确实生效**） |
+| `nscTrust` | ❌ 2300090（被静态 pin 拦） | ❌ 1007900060（仍不读 anchors） |
+| `pinSpki`（静态 pin 错、动态 pin 对） | ❌ 2300090 | ✅ **200**（不受 NSC pin-set 约束） |
+
+即：这份 NSC 在本构建中显然压得住 Network Kit/axios，而 RCP 的 anchors/pin-set 观测结果与
+"完全没有这些配置"的基线**逐行一致**。→ **RCP 对 NSC 的遵循度 = 只有明文组件开关这一项**。
+
+⚠️ 边界：以上结论的环境是 **OpenHarmony 6.1.1(24) 模拟器镜像**、`domain-config` 用 **IP** 匹配、
+CA 目录同时含 `cert.pem` 与 `<hash>.0`。官方文档称 RCP 也可通过 `network_config.json` 配置 CA，
+与本实测冲突——**真机复测、主机名域匹配、CA 目录形态**三项待验证，清单见
+[`network-compare/NSC-VERIFICATION.md`](network-compare/NSC-VERIFICATION.md) §10。
+
 **复现方式**
 
 ```bash

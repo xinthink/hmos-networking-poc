@@ -200,12 +200,18 @@ devecocli log --device "Pura 90" --bundle-name com.example.networkcompare \
 | V4 | 有 | 错误 | `nscTrust`/`nscTrustCa`/`pinSpki`/`pinBackup` 全 FAIL 2300090 |
 | V5 | **无** | 正确 | `nscTrust` FAIL 2300060（pin 不能替代信任锚点） |
 | V6 | 有 | 错误但 `expiration` 已过期 | `nscTrust` 200；动态 pin 恢复生效 |
+| **V7** | 有 | 错误 + `cleartext=false` + RCP 开关 true | **同构建自证**：RCP 明文被拦（1007900201）证明开关生效，而 anchors/pin-set 仍被忽略（见 `NSC-VERIFICATION.md` §6-F） |
 
 > 结论：NSC 的 trust-anchors 与 pin-set 是 **AND**；**生效中的域级 `pin-set` 完全覆盖
 > 请求级 `certificatePinning`**（动态 pin 不参与判定）；RCP 对两者都**忽略**。
 
 流程：改 JSON → `devecocli build` → `devecocli run --device "Pura 90" --skip-build --uninstall`
 → 点自检 → 读 NSCTEST → **实验结束后 `git checkout -- <config>` 还原并重建**。
+
+### 待验证事项（未做，勿当结论）
+`NSC-VERIFICATION.md` §10 列了三项待验证：**真机复测**（现有结论全部来自 OpenHarmony 模拟器镜像）、
+**主机名域匹配**（我们用的是 IP `10.0.2.2`）、**CA 目录形态**（同时放 `cert.pem` 与 `<hash>.0`）。
+在这些完成前，RCP 遵循度结论的环境口径应写成"OpenHarmony 6.1.1(24) 模拟器 + IP 域匹配 + 当前目录形态下"。
 
 ### 跨系统版本复验（系统升级后手工做一次）
 完整流程与结果矩阵见 [`NSC-VERIFICATION.md`](NSC-VERIFICATION.md) §5/§7：

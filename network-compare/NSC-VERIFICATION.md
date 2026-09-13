@@ -198,6 +198,69 @@ cd mock-server && npm run pins        # 打印 SPKI / 整证书两种摘要
 `digest` / `publicKeyHash` = `base64(sha256(SubjectPublicKeyInfo))`（**不是**整证书摘要）。
 证书重新生成后不同步 `NscPins.ets` 与 `pin-set` 会直接导致全部 pin 场景失败。
 
+### F. V7 同一构建自证：开关确实生效 × 遵守度（2026-09 复核）
+
+§5.3-D 的结论（"RCP 忽略 NSC anchors/pin-set"）可能被质疑为"其实那个开关没生效"。
+V7 用**一次构建**把两个观测放进同一个 NSC 文件里，消除这一辩解。
+
+**V7 配置**（`base-config` 与 `domain-config` 都禁明文、都配 trust-anchors；
+`component-config` 三项全 true；domain 加**错误**摘要的 pin-set）：
+
+```json
+{
+  "network-security-config": {
+    "base-config": {
+      "cleartextTrafficPermitted": false,
+      "trust-anchors": [
+        { "certificates": "/data/storage/el1/bundle/entry/resources/resfile/mock-ca" }
+      ]
+    },
+    "domain-config": [
+      {
+        "domains": [ { "include-subdomains": true, "name": "10.0.2.2" } ],
+        "cleartextTrafficPermitted": false,
+        "trust-anchors": [
+          { "certificates": "/data/storage/el1/bundle/entry/resources/resfile/mock-ca" }
+        ],
+        "pin-set": {
+          "expiration": "2035-12-31",
+          "pin": [
+            { "digest-algorithm": "sha256",
+              "digest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" }
+          ]
+        }
+      }
+    ],
+    "component-config": { "Request": true, "Network Kit": true, "Remote Communication Kit": true }
+  }
+}
+```
+
+**V7 实测**（`ran=36 pass=12`；同一构建、同一份 NSC）：
+
+| 观测 | Network Kit / axios | RCP | 读出的规则 |
+|---|---|---|---|
+| `nscCleartext` | ❌ 2300997 `Cleartext traffic not permitted` | ❌ **1007900201** `Plaintext transmission is forbidden` | **开关确实生效**（RCP 被全局明文禁令拦下） |
+| `nscTrust` | ❌ 2300090（被静态 pin 拦） | ❌ **1007900060** | 开关生效的同时，RCP 仍不读 NSC trust-anchors |
+| `nscTrustSystem` | ❌ 2300090 | ❌ 1007900060 | 同上（显式 `'system'`） |
+| `nscTrustCa` | ❌ 2300090（静态 pin 覆盖其 `caData`） | ✅ **200** | RCP 只认自己的代码级 CA |
+| `pinSpki`（NSC 静态 pin **错误**、动态 pin 正确） | ❌ 2300090 | ✅ **200** | **NSC pin-set 对 RCP 无约束** |
+| `pinBackup` | ❌ 2300090 | ✅ 200 | 同上 |
+| `pinWrong` | ❌ 2300090 | ❌ 1007900090 | RCP 自己的动态 pin 仍生效 |
+| `pinSkipTrust` | N/A | ❌ 1007900090 | `'skip'` 不关 pinning |
+| `pinUntrustedTrust` | N/A | ❌ 1007900060 | pin 不替代信任锚点 |
+
+**分析**
+
+1. **同一构建内自证**：这份 NSC 明确压住了 Network Kit/axios（明文被拦 + 静态 pin 覆盖其动态
+   pin），说明 NSC 在本构建中**确实是生效的**；就在同一构建里，RCP 的 anchors 与 pin-set
+   观测结果与"完全没有这些配置"的基线**逐行一致**（仅明文一项变化，且原因就是明文禁令本身）。
+2. 因此"RCP 不遵守 NSC anchors/pin-set"不能用"开关没打开/NSC 没生效"解释。
+3. RCP 对 NSC 的遵循度可精确表述为：**只有 `component-config` 明文开关这一项生效**；
+   `trust-anchors`、`pin-set` 均不生效（对 RCP 而言等于不存在）。
+4. 与官方文档的冲突仍然存在（文档称 RCP 也可通过 `network_config.json` 配置 CA），
+   待验证事项见 §10。
+
 ## 7. 跨版本复验（手工，系统升级后做一次）
 
 **前置**：mock server 已启动（`cd mock-server && npm start`）；模拟器/真机已连通；
@@ -258,3 +321,18 @@ cd mock-server && npm run pins        # 打印 SPKI / 整证书两种摘要
    用 `cd mock-server && npm run pins` 重算，否则 pin 场景全红。
 7. **`pin-set` 会静默压制代码里的 `certificatePinning`**（生效中的域级静态 pin 优先，
    见 §6-C）：排查 pin 不生效时先确认 NSC 里有没有配 `pin-set`。
+
+## 10. 待验证事项（Pending，已知未做）
+
+以下三项**尚未验证**，按预期价值排序；记录在此以免被误当作已证实结论：
+
+| # | 待验证 | 为什么要做 | 怎么判定 |
+|---|---|---|---|
+| 1 | **真机复测**（商用 HarmonyOS 真机，非模拟器） | 现有全部结论来自 `OpenHarmony-6.1.1.125` 模拟器镜像；RCP 属 hms 协作能力域、SDK 里 `librcp_c.so` 只是空 stub、真实实现由设备提供 —— 模拟器镜像的 RCP 很可能未接 NSC 集成。这是"文档称 RCP 也读 `network_config.json`，实测却不读"这一矛盾的**首要候选解释** | 真机上跑同一份自检，对比 `nscTrust`/`pinSpki` 等 RCP 列 |
+| 2 | **域名（主机名）而非 IP 的 domain 匹配** | 我们的 `domain-config.domains.name` 用的是 IP `10.0.2.2`。Network Kit 按 IP 匹配成功，但 RCP 的实现可能只按**主机名**匹配 domain-config | 把 mock server 用主机名访问（如 `localhost` / 自定义 hosts 名）重跑 `nscTrust` |
+| 3 | **CA 目录形态** | 我们的 `trust-anchors.certificates` 目录里同时放 `cert.pem` 与 `openssl x509 -hash` 命名的 `<hash>.0`。Network Kit 接受，RCP 的加载器可能只认其中一种 | 分别只放 `<hash>.0` / 只放 `cert.pem` 各跑一轮 |
+
+> 结论口径：在上述三项完成前，本套件的 RCP 遵循度结论应表述为
+> "**在 OpenHarmony 6.1.1(24) 模拟器镜像、IP 域匹配、当前 CA 目录形态下**，
+> RCP 不遵守 NSC 的 `trust-anchors` 与 `pin-set`"。
+

@@ -142,7 +142,7 @@ devecocli emulator list / start "Pura 90"
 | Cache (max-age) | ❌ 默认 `usingCache: true` 实测未命中 | ✅ `ResponseCache` 命中 | ❌ 无缓存 API（`config.cache` 仅 HttpClient 适配器），实测未命中 |
 | Cache + ETag (304) | ❌ 未发送 If-None-Match | ✅ If-None-Match → 304 → 复用缓存 | ❌ 无自动；手动可用但 **304 默认被 validateStatus 拒绝** |
 | Multipart / 二进制上传 | ✅ | ✅ | ✅（`axios.FormData` / `data:ArrayBuffer`） |
-| 网络安全配置: trust-anchors | ✅ 遵循 network_config.json 应用级信任锚点（base+domain 都需配置） | ❌ **完全不遵循**；缺省与显式 `remoteValidation: 'system'` 都失败（1007900060），只能用代码级 `remoteValidation` | ✅ 遵循（跟随 net.http，同 Network Kit） |
+| 网络安全配置: trust-anchors | ✅ 遵循 network_config.json 应用级信任锚点（base+domain 都需配置） | ❌ **完全不遵循**；缺省与显式 `remoteValidation: 'system'` 都失败（1007900060），只能用代码级 `remoteValidation`（变体 V7 已在 `component-config=true` 且明文禁令生效的同一次构建里自证） | ✅ 遵循（跟随 net.http，同 Network Kit） |
 | 网络安全配置: 明文控制 | ✅ 受 component-config 约束（默认 true=受控） | ⚠️ 全局 `cleartextTrafficPermitted: false` **拦不住 RCP**（实测仍 200）；只有 `component-config."Remote Communication Kit": true` 才受控（否则 1007900201） | ✅ 受 `"Network Kit"` 组件配置约束（底层是 net.http） |
 | 证书锁定 (pin) | ✅ `certificatePinning` 生效（错误 pin → 2300090）；`publicKeyHash` = **公钥(SPKI) SHA-256**；数组为白名单 | ✅ 同样生效（1007900090）；与 `remoteValidation` 是 **AND**，且 `'skip'` **不**放弃 pinning；**忽略 NSC `pin-set`** | ✅ 透传 `config.certificatePinning`（同 Network Kit） |
 | 协议/缓存/连接可观测性 | ✅ `connectionExtraInfo`（协议名、isCacheHit） | ✅ `httpVersion` / `cacheInfo` | ❌ 仅 `performanceTiming`，**不暴露协议版本/isCacheHit/cookies** |
@@ -151,6 +151,12 @@ devecocli emulator list / start "Pura 90"
 > ⚠️ 不要因为"看起来奇怪"就擅自"修复"上述差异 —— 它们是本工程要记录和对比的
 > **实测事实**（详见 `COMPARISON.md`）。若要改变实验条件（如给 Network Kit 配置
 > `http.createHttpResponseCache()` 后再测缓存），先确认这是新的实验维度，并更新文档。
+>
+> ⚠️ **NSC 相关两行的环境口径**（trust-anchors / 证书锁定对 RCP 无效）：实测环境是
+> **OpenHarmony 6.1.1(24) 模拟器镜像**、`domain-config` 用 **IP** 匹配、CA 目录同时含
+> `cert.pem` 与 `<hash>.0`。官方文档称 RCP 也可通过 `network_config.json` 配置 CA，
+> 与之冲突；**真机复测 / 主机名域匹配 / CA 目录形态**三项待验证，清单见
+> `network-compare/NSC-VERIFICATION.md` §10。
 
 ### Cangjie 版（cj-network-compare）补充结论
 
